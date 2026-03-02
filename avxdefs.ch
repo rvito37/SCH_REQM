@@ -127,7 +127,8 @@ FIELD Sched_sour, Sched_Grou
 // Route through SafeDbSetIndex() which checks file existence and catches errors.
 #xtranslate dbsetindex( <x> ) => SafeDbSetIndex( <x> )
 
-// REQUEST for ADS and codepage
+// REQUEST for ADS, codepage, and CT3 functions used in macro-compiled index keys
 REQUEST DBFCDX
 REQUEST ADS
 REQUEST HB_CODEPAGE_HE862
+REQUEST DESCEND
