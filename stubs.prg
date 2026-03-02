@@ -2116,6 +2116,89 @@ dbSelectArea(nOldArea)
 RETURN NIL
 
 // ============================================
+// SchedIndex - Build d_stock temp indexes (from schedindex.prg)
+// Called before ordsetfocus(1) on d_stock in DoSched (sch_reqm line 580)
+// Updates seq_no from c_hierar priority, then creates 6 conditional tags
+// into d_stocktmp.cdx for scheduling lookups by location (CZ/IL/06).
+// ============================================
+FUNCTION SchedIndex()
+LOCAL nOldArea := Select()
+LOCAL cTempDir := GetUserInfo():cTempDir
+LOCAL cIdxFile := cTempDir + "d_stocktmp"
+
+LogWrite("SchedIndex: starting, cTempDir=" + cTempDir)
+
+// Delete old index file if exists
+IF FILE(cIdxFile + ".cdx")
+   FERASE(cIdxFile + ".cdx")
+   LogWrite("SchedIndex: deleted old " + cIdxFile + ".cdx")
+ENDIF
+
+// === Phase 1: Update seq_no from c_hierar priority ===
+DbSelectArea("d_stock")
+d_stock->(dbSetFilter({|| d_stock->wh1 + d_stock->wh2 + d_stock->wh3 + d_stock->wh4 + d_stock->wh6 > 0}))
+d_stock->(dbGoTop())
+
+LogWrite("SchedIndex: updating seq_no from c_hierar...")
+DO WHILE !d_stock->(Eof())
+   IF d_stock->(RLock())
+      d_stock->seq_no := GetHie_2(d_stock->tol_id, d_stock->volt_id, d_stock->tc_id)
+      d_stock->(dbUnlock())
+   ENDIF
+   d_stock->(dbSkip())
+ENDDO
+
+// Clear the filter after seq_no update
+d_stock->(dbClearFilter())
+d_stock->(dbGoTop())
+
+// === Phase 2: Create 6 conditional index tags ===
+LogWrite("SchedIndex: creating index tags in " + cIdxFile)
+
+INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
+   TAG viva_CZ TO (cIdxFile) FOR LOC == 'CZ' .AND. wh3+wh4 > 0
+LogWrite("SchedIndex: tag viva_CZ created")
+
+INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
+   TAG viva_IL TO (cIdxFile) FOR LOC == 'IL' .AND. wh3+wh4 > 0
+LogWrite("SchedIndex: tag viva_IL created")
+
+INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
+   TAG U_viva_CZ TO (cIdxFile) FOR LOC == 'CZ' .AND. wh3+wh4 > 0
+LogWrite("SchedIndex: tag U_viva_CZ created")
+
+INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
+   TAG U_viva_IL TO (cIdxFile) FOR LOC == 'IL' .AND. wh3+wh4 > 0
+LogWrite("SchedIndex: tag U_viva_IL created")
+
+INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
+   TAG viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
+LogWrite("SchedIndex: tag viva_06 created")
+
+INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
+   TAG U_viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
+LogWrite("SchedIndex: tag U_viva_06 created")
+
+LogWrite("SchedIndex: completed, file exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
+
+dbSelectArea(nOldArea)
+RETURN NIL
+
+// GetHie_2 - Get hierarchy priority for stock record (from schedindex.prg)
+// Looks up c_hierar by tol_id+volt_id+tc_id, returns 2-char priority level
+FUNCTION GetHie_2(tol_id, volt_id, tc_id)
+LOCAL nOldSel := Select()
+LOCAL cRetVal := "  "
+
+DbSelectArea("c_hierar")
+c_hierar->(ordSetFocus("hierar"))
+c_hierar->(dbSeek(tol_id + volt_id + tc_id))
+IIF(Found(), cRetVal := SubStr(c_hierar->priorlevel, 1, 2), NIL)
+
+dbSelectArea(nOldSel)
+RETURN HB_AnsiToOem(cRetVal)
+
+// ============================================
 // ShaiCond - Test record against criteria (from PRNCRIT.PRG line 4568)
 // ============================================
 FUNCTION ShaiCond( aTestBlks, oScrl, cField, lReport )
@@ -2219,14 +2302,8 @@ FUNCTION IfInDTRange( aValues, nValue )
    HB_SYMBOL_UNUSED( nValue )
 RETURN .T.
 
-// GetHie_2 (real: BMS/SCH_ORDM.PRG line 953)
-// Returns hierarchy level as string. Used in index keys (concatenated with b_id)
-// and val() comparisons. Looks up c_hierar by tol_id+volt_id+tc_id.
-FUNCTION GetHie_2( tol_id, volt_id, tc_id )
-   HB_SYMBOL_UNUSED( tol_id )
-   HB_SYMBOL_UNUSED( volt_id )
-   HB_SYMBOL_UNUSED( tc_id )
-RETURN "1"
+// GetHie_2 - now implemented as real function above (in SchedIndex section)
+// Old stub that returned "1" has been replaced.
 
 // XSoftCopy (real: BMS/AVXUTI.PRG line 222)
 FUNCTION XSoftCopy( cFields, cTargName, cWhileExp, cForExp, lSDF )

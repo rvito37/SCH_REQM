@@ -127,6 +127,14 @@ FIELD Sched_sour, Sched_Grou
 // Route through SafeDbSetIndex() which checks file existence and catches errors.
 #xtranslate dbsetindex( <x> ) => SafeDbSetIndex( <x> )
 
+// SchedIndex hook: sch_reqm.prg line 577 displays this unique message right before
+// the stock index setup (lines 579-581). Intercept it to call SchedIndex() which
+// builds d_stocktmp.cdx (seq_no update + 6 conditional tags). This replaces the
+// commented-out MYRUN("G:\SOURCE\test.exe") at line 578.
+// Use DevPos+DevOut to avoid circularity with @ SAY #command pattern.
+#command @ 9, 11 SAY "Preparing tempery files : Stock files index" =>;
+   DevPos(9, 11) ;; DevOut("Preparing tempery files : Stock files index") ;; SchedIndex()
+
 // REQUEST for ADS, codepage, and CT3 functions used in macro-compiled index keys
 REQUEST DBFCDX
 REQUEST ADS
