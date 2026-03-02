@@ -846,53 +846,130 @@ RETURN .F.
 #include "hbclass.ch"
 
 CREATE CLASS TheReport
-   VAR cName
-   VAR cDesc
-   VAR aSort
-   VAR aExprSort
-   VAR aFields
-   VAR aTitles
-   VAR aCrit
-   VAR aBuffer
-   VAR aCheck
-   VAR aQueryBlocks
-   VAR aDB
-   VAR lSuperSmart
-   VAR aSuperCriteria
-   VAR aSuperIndexes
-   VAR cRepDbf
-   VAR cPrepDbf
-   VAR cRepFileName
-   VAR cbExtraCond
-   VAR cbPrepDbf
+   // Sort and criteria
+   VAR aSortName         // Sort names
+   VAR aSortList         // Sort list with index expression
+   VAR aSortExpr         // Sort list index expression
+   VAR aCritList         // Criteria list
+   VAR aGetBuffer        // Buffer names for criteria
+   VAR aCheckBlocks      // Code blocks for check screens
+   VAR aTstBlocks        // Code blocks for query testing
+   VAR aMyBuffer         // User-selected criteria results
+   VAR aDBs              // Array of DBF files
+   VAR aFldList          // Field list for spreadsheet
+   VAR aTitles           // Titles for spreadsheet
+   VAR aShortShow        // Short representation
+   VAR aSuperCriteria    // Which criteria have indexes
+   VAR aSuperIndexes     // Indexes for super criteria
+   VAR aHandyArray       // Extra data
+   VAR aReports          // Multiple report files
+   VAR aXTabCargo        // Cross-tab info
+   // String vars
+   VAR cReportName       // Report name
+   VAR cRepTitle         // Report title
+   VAR cSubTitle         // Sub title
+   VAR cRepDbf           // Name used in report design
+   VAR cPrepDbf          // Name of prep DB
+   VAR cPrepShort        // Short prep
+   VAR cRepFileName      // TVR file name
+   VAR cBaseIndex        // Base index
+   VAR cTempFileDir      // Temp directory
+   VAR cTypeOfReport     // "REPORT" or "QUERY"
+   VAR cDevType          // Device type
+   VAR cSortType         // Selected sort type
+   VAR cRemark           // Remark
+   VAR cRepBotTitle      // Bottom title
+   VAR cTop
+   VAR cBottom
+   // Code blocks
+   VAR cbExtraCond       // Extra hard-coded condition
+   VAR cbPrepDbf         // Code block that prepares filtered DB
+   VAR cbPrepShort       // Short prep block
+   VAR cbPreQuery        // Pre-query block
+   VAR cbSetRelation     // Set relations block
+   VAR cbBuildRep        // Build report on the fly
+   // Logical
+   VAR lBuildDBF         // Build report on the fly
+   VAR lCreateOrp        // Create ORP from definition
+   VAR lCustFile         // Customer file
+   VAR lDoIndex          // Do index
+   VAR lMultiIndex       // Multiple index
+   VAR lPrepDbf          // Should build filtered DB
+   VAR lRelIndex         // Related index
+   VAR lUseScope         // Use scope instead of temp file
+   VAR lWeWantDiffMenu   // Pre-menu
+   VAR lSuperSmart       // Multiple indexes
+   VAR lDest             // Destination flag
+   // Numeric
+   VAR nDest             // Destination numeric
+   VAR nOldPrinter       // Old printer number
+   VAR nSmartCriteria    // Smart criteria index
+   // Objects
+   VAR oScrl             // ScrollBox
+   VAR aOrp              // ORP array
+   // Methods
    METHOD New( cName, cDesc )
-   METHOD SetSort( a )      INLINE ::aSort := a
-   METHOD SetExprSort( a )  INLINE ::aExprSort := a
-   METHOD SetFields( a )    INLINE ::aFields := a
-   METHOD SetTitles( a )    INLINE ::aTitles := a
-   METHOD SetCrit( a )      INLINE ::aCrit := a
-   METHOD SetBuffer( a )    INLINE ::aBuffer := a
-   METHOD SetCheck( a )     INLINE ::aCheck := a
-   METHOD SetQueryBlocks( a ) INLINE ::aQueryBlocks := a
-   METHOD SetDB( a )        INLINE ::aDB := a
-   METHOD Exec( lFlag )
+   METHOD SetSort( a )        INLINE ( ::aSortName := a, ::aSortList := a )
+   METHOD SetExprSort( a )    INLINE ::aSortExpr := a
+   METHOD SetFields( a )      INLINE ::aFldList := a
+   METHOD SetTitles( a )      INLINE ::aTitles := a
+   METHOD SetCrit( a )        INLINE ( ::aCritList := a, ::aGetBuffer := a )
+   METHOD SetBuffer( a )      INLINE ::aGetBuffer := a
+   METHOD SetCheck( a )       INLINE ( ::aCheckBlocks := a, ::aTstBlocks := a )
+   METHOD SetQueryBlocks( a ) INLINE ::aTstBlocks := a
+   METHOD SetDB( a )          INLINE ::aDBs := a
+   METHOD Exec( lSeeMessage )
 END CLASS
 
 METHOD New( cName, cDesc ) CLASS TheReport
-   ::cName := cName
-   ::cDesc := cDesc
-   ::lSuperSmart := .F.
+   ::cReportName     := cName
+   ::cRepTitle       := cDesc
+   ::cSubTitle       := ""
+   ::cTypeOfReport   := "REPORT"
+   ::lSuperSmart     := .F.
+   ::lBuildDBF       := .F.
+   ::lPrepDbf        := .T.
+   ::lCreateOrp      := .F.
+   ::lWeWantDiffMenu := .F.
+   ::lUseScope       := .F.
+   ::lDest           := .F.
+   ::aMyBuffer       := {}
+   ::aReports        := {}
+   ::aHandyArray     := {}
+   ::aXTabCargo      := {}
+   ::cTempFileDir    := GetUserInfo():cTempDir
+   ::nSmartCriteria  := 0
    LogWrite( "TheReport:New(" + cName + ")" )
 RETURN Self
 
-METHOD Exec( lFlag ) CLASS TheReport
-   LOCAL lResult := .T.
-   HB_SYMBOL_UNUSED( lFlag )
-   LogWrite( "TheReport:Exec() - running PrepareDbf callback" )
+METHOD Exec( lSeeMessage ) CLASS TheReport
+   // Simplified Exec for auto-scheduling (no prnFace UI)
+   // In full BMS, Exec paints criteria selection UI via prnFace()
+   // For AUTOMAIL/batch mode: skip UI, use empty buffers (= select all)
+   LOCAL i
+   PRIVATE aTestBlocks, aBuffer  // MUST be PRIVATE - used by DoSched via GetBuffer/ShaiCond
+
+   LogWrite( "TheReport:Exec() - auto mode, no criteria UI" )
+
+   // Initialize aMyBuffer with empty strings (= no filter = select all)
+   ::aMyBuffer := {}
+   IF ::aGetBuffer != NIL
+      FOR i := 1 TO Len( ::aGetBuffer )
+         AAdd( ::aMyBuffer, "" )
+      NEXT
+   ENDIF
+
+   // Set PRIVATE variables that sch_reqm.prg functions expect
+   aTestBlocks := ::aTstBlocks
+   aBuffer     := ::aMyBuffer
+
+   // Call the prep callback (DoSched for scheduling)
    IF ::cbPrepDbf != NIL
+      LogWrite( "TheReport:Exec() - calling cbPrepDbf (DoSched)" )
       Eval( ::cbPrepDbf, Self )
    ENDIF
-RETURN lResult
+
+RETURN .T.
 
 // GetUserInfo (real: BMS/USERINFO.PRG)
 CREATE CLASS GetUserInfoClass
@@ -999,11 +1076,14 @@ METHOD Hide() CLASS Form
 RETURN Self
 
 // GetBuffer (real: BMS/PRNCRIT.PRG line 4453)
+// Returns "" (empty) = no filter = select all records
+// In full BMS, returns user-selected criteria from prnFace UI
 FUNCTION GetBuffer( cCode )
    HB_SYMBOL_UNUSED( cCode )
-RETURN "all"
+RETURN ""
 
 // critBrowse (real: BMS/PRNCRIT.PRG line 2877)
+// Returns "" (empty) = select all, no criteria filter
 FUNCTION critBrowse( o, aParamList, cFile, cIndex, bKeyCol, bNameCol, bFilter )
    HB_SYMBOL_UNUSED( o )
    HB_SYMBOL_UNUSED( aParamList )
@@ -1012,7 +1092,7 @@ FUNCTION critBrowse( o, aParamList, cFile, cIndex, bKeyCol, bNameCol, bFilter )
    HB_SYMBOL_UNUSED( bKeyCol )
    HB_SYMBOL_UNUSED( bNameCol )
    HB_SYMBOL_UNUSED( bFilter )
-RETURN "all"
+RETURN ""
 
 // SchedBr (real: BMS/SCH_FORM.PRG)
 CREATE CLASS SchedBr
