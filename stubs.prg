@@ -2371,10 +2371,13 @@ FUNCTION GetDefPrn()
 RETURN "LPT1"
 
 // GetRec (real: BMS/SCH_ORDM.PRG line 584)
+// Tries to lock the current record and shows progress at aPos. Returns .T. on success.
 FUNCTION GetRec( aPos )
    HB_SYMBOL_UNUSED( aPos )
-RETURN NIL
+RETURN .T.
 
 // TestAvail (real: BMS/SCH_ORDM.PRG line 1700)
+// TestAvail (real: BMS/SCH_ORDM.PRG) - tests c_expqty for errors
+// Returns { {tol_ids}, {seq_nos} } array pair
 FUNCTION TestAvail()
-RETURN .T.
+RETURN { {}, {} }
