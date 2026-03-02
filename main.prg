@@ -23,7 +23,7 @@ PROCEDURE Main()
    rddSetDefault( "ADS" )
    SET SERVER REMOTE
    SET FILETYPE TO CDX
-   SET DEFAULT TO G:\AVXBMS
+   SET DEFAULT TO G:\TEST
 
    // Hebrew codepage
    HB_CDPSELECT( "HE862" )
