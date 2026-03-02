@@ -113,6 +113,15 @@
 // Also fix the FIELD declaration to use truncated names
 FIELD Sched_sour, Sched_Grou
 
+// COPY TO fix: when default RDD is ADSCDX, COPY TO local temp paths fails
+// because ADS cannot create files on local paths. Force DBFCDX for all COPY TO.
+// Override the standard std.ch COPY TO command to hardcode VIA "DBFCDX".
+#command COPY [TO <(f)>] [FIELDS <fields,...>]                              ;
+              [FOR <for>] [WHILE <while>] [NEXT <next>]                     ;
+              [RECORD <rec>] [<rest:REST>] [ALL] [VIA <rdd>] [CODEPAGE <cp>] => ;
+         __dbCopy( <(f)>, { <(fields)> },                                   ;
+                   <{for}>, <{while}>, <next>, <rec>, <.rest.>, "DBFCDX",, <cp> )
+
 // dbsetindex wrapper: ADS requires table and index on same server.
 // Temp indexes (d_stocktmp.cdx) may be local while table is on ADS.
 // Route through SafeDbSetIndex() which checks file existence and catches errors.
