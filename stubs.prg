@@ -521,6 +521,7 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
    LOCAL cDbfDir
    LOCAL nAlert
    LOCAL cLockingUser, aLockingUser := {"", NIL}, nLock
+   LOCAL bOldErr, lOpenErr
 
    // Get base directory: from cDir parameter, or from GetUserInfo():cDbfDir
    IF cDir == NIL
@@ -552,10 +553,24 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
 
          IF ( Select(cDataBase) == 0 ) .OR. ;
             ( Select(cDataBase) != 0 .AND. cAlias != NIL .AND. Select(cAlias) == 0 )
-            IF Empty(lDirectory)
-               DBUSEAREA( lNewWorkArea, cDriver, (cDbfDir + cDataBase), cAlias, lOpenMode, .F. )
-            ELSE
-               DBUSEAREA( lNewWorkArea, cDriver, (cDataBase), cAlias, lOpenMode, .F. )
+
+            // Wrap DBUSEAREA in error trap to handle "file not found" gracefully
+            lOpenErr := .F.
+            bOldErr := ErrorBlock( {|e| Break(e) } )
+            BEGIN SEQUENCE
+               IF Empty(lDirectory)
+                  DBUSEAREA( lNewWorkArea, cDriver, (cDbfDir + cDataBase), cAlias, lOpenMode, .F. )
+               ELSE
+                  DBUSEAREA( lNewWorkArea, cDriver, (cDataBase), cAlias, lOpenMode, .F. )
+               ENDIF
+            RECOVER
+               lOpenErr := .T.
+            END SEQUENCE
+            ErrorBlock( bOldErr )
+
+            IF lOpenErr
+               LogWrite( "NetUse: DBUSEAREA error for " + cDataBase + " - file may not exist" )
+               RETURN .F.
             ENDIF
          ELSE
             SELECT Select(cDataBase)
