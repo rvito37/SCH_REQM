@@ -1930,6 +1930,7 @@ ENDIF
 // from the lookup table so that  code $ buffer  always returns .T.
 // Cache the result in the STATIC so we don't rebuild on every call.
 IF Empty(uRet)
+   LogWrite("GetBuffer: empty buffer for " + cCode + " (n=" + LTrim(Str(n)) + "), calling BuildAll")
    uRet := GetBuffer_BuildAll( cCode )
    // Cache the built buffer back into the STATIC var
    IF !Empty(uRet)
@@ -1955,6 +1956,9 @@ RETURN uRet
 STATIC FUNCTION GetBuffer_BuildAll( cCode )
 LOCAL cFile, cKeyField, cResult := "", nOldArea, nOldRec
 LOCAL lOpened := .F.
+LOCAL bOldErr, lErr := .F., nFPos
+
+LogWrite("GetBuffer_BuildAll: ENTER cCode=" + cCode)
 
 // Map criterion name to table name and key field
 DO CASE
@@ -1985,19 +1989,39 @@ ENDCASE
 
 nOldArea := Select()
 
+LogWrite("GetBuffer_BuildAll: file=" + cFile + " keyField=" + cKeyField + " Select()=" + LTrim(Str(Select(cFile))))
+
 // Open the table if not already open
 IF Select(cFile) == 0
+   bOldErr := ErrorBlock( {|e| Break(e) } )
    BEGIN SEQUENCE
       NetUse(cFile, 5)
       lOpened := .T.
       LogWrite("GetBuffer_BuildAll: opened " + cFile + " for all-codes scan")
    RECOVER
+      lErr := .T.
+   END SEQUENCE
+   ErrorBlock( bOldErr )
+   IF lErr
       LogWrite("GetBuffer_BuildAll: WARNING - cannot open " + cFile + ", returning empty")
       dbSelectArea(nOldArea)
       RETURN ""
-   END SEQUENCE
+   ENDIF
 ELSE
    dbSelectArea(cFile)
+   LogWrite("GetBuffer_BuildAll: " + cFile + " already open in area " + LTrim(Str(Select())))
+ENDIF
+
+nFPos := FieldPos(cKeyField)
+LogWrite("GetBuffer_BuildAll: FieldPos(" + cKeyField + ")=" + LTrim(Str(nFPos)) + " RecCount=" + LTrim(Str(RecCount())))
+
+IF nFPos == 0
+   LogWrite("GetBuffer_BuildAll: ERROR - field " + cKeyField + " not found in " + cFile)
+   IF lOpened
+      dbCloseArea()
+   ENDIF
+   dbSelectArea(nOldArea)
+   RETURN ""
 ENDIF
 
 nOldRec := RecNo()
@@ -2005,10 +2029,10 @@ dbGoTop()
 DO WHILE !EOF()
    IF cKeyField == "value_id"
       // Match critBrowse format: Str(value_id, 9, 3)
-      cResult += Str(FieldGet(FieldPos(cKeyField)), 9, 3) + "_"
+      cResult += Str(FieldGet(nFPos), 9, 3) + "_"
    ELSE
       // Match critBrowse format: raw field value (no trim, same as Eval(bKeyCol))
-      cResult += FieldGet(FieldPos(cKeyField)) + "_"
+      cResult += FieldGet(nFPos) + "_"
    ENDIF
    dbSkip()
 ENDDO
