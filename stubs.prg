@@ -1930,6 +1930,12 @@ RETURN Self
 FUNCTION CheckIndex( cAlias, cIndex, cKey, lReIndex, cFor, lUni )
 LOCAL nOldArea := SELECT()
 
+   // DBF field names are limited to 10 chars. The original Clipper code uses long
+   // names in index key expressions (strings). #xtranslate only fixes source-level
+   // identifiers, not runtime strings. Fix the macro-compiled key expression here.
+   cKey := StrTran( cKey, "Sched_Group_Seq", "Sched_Grou" )
+   cKey := StrTran( cKey, "Sched_source",    "Sched_sour" )
+
    LogWrite( "CheckIndex: tag=" + cAlias + " idx=" + cIndex + " key=" + cKey + ;
              " reindex=" + IIF( lReIndex, "T", "F" ) )
 
