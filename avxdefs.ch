@@ -101,10 +101,17 @@
 #define FRAMECAPTION  Chr(201)+Chr(205)+Chr(187)+Chr(186)+Chr(188)+Chr(205)+Chr(200)+Chr(186)
 #define ALERT_WARN    "W+/R, W+/B"
 
-// Field declarations for custom fields added by PrepareGenDb
-// These are needed so Harbour resolves (alias)->Sched_source as field access
-// not memvar access. DBF truncates to 10 chars: Sched_sour, Sched_Grou
-FIELD Sched_source, Sched_Group_Seq
+// DBF field name truncation fix for PrepareGenDb custom fields.
+// DBF limits field names to 10 chars. The original Clipper code uses long names
+// like Sched_source (12ch) and Sched_Group_Seq (15ch) which get truncated to
+// Sched_sour and Sched_Grou in the DBF. Clipper silently truncated field lookups;
+// Harbour does not, causing "Variable does not exist" errors.
+// Map the long identifier forms to truncated DBF field names via preprocessor.
+#xtranslate Sched_source    => Sched_sour
+#xtranslate Sched_Group_Seq => Sched_Grou
+
+// Also fix the FIELD declaration to use truncated names
+FIELD Sched_sour, Sched_Grou
 
 // REQUEST for ADS and codepage
 REQUEST DBFCDX
