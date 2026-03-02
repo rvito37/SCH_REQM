@@ -1067,6 +1067,8 @@ METHOD Exec( lSeeMessage ) CLASS TheReport
    // Show criteria selection screen (from THEREPO.PRG line 249)
    prnFace( ::aSortList, ::aCritList, {::cReportName, ::cRepTitle}, 1, ::cSubTitle, ::aSuperCriteria, ::lDest )
 
+   LogWrite( "TheReport:Exec() - prnFace returned, LastKey()=" + LTrim(Str(LastKey())) )
+
    // Check if user pressed ESC (from THEREPO.PRG line 264-271)
    IF LastKey() == K_ESC
       xKey := Alert( "You pressed ESC.;Do you want to stop?", {"No", "Yes"}, ALERT_WAR )
