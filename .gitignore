@@ -1,0 +1,10 @@
+*.exe
+*.obj
+*.o
+*.c.1
+*.ppo
+*.log
+*.bak
+*.tmp
+*.hbdep
+hbmk.hbc

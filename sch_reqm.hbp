@@ -1,0 +1,46 @@
+# sch_reqm.hbp - Build configuration for SCH_REQM Harbour migration
+# Compile: C:\harbour-mingw\hb32\bin\hbmk2 sch_reqm.hbp
+
+-inc
+-incpath=.
+-incpath=../
+-incpath=../../PDC-clean/BMS
+-incpath=../../PDC-clean/LIB
+-incpath=C:/harbour-mingw/hb32/contrib/rddads
+-incpath=C:/harbour-mingw/hb32/contrib/gtwvg
+
+# Compiler flags
+-w0
+-es0
+-n
+
+# GUI terminal (hybrid console/GUI)
+-gtWVG
+
+# Linker flags
+-ldflag=-Wl,--allow-multiple-definition
+
+# Libraries
+hbnf.hbc
+hbxpp.hbc
+hbct.hbc
+rddads.hbc
+gtwvg.hbc
+
+# ============================================
+# Project source files
+# ============================================
+
+main.prg
+sch_reqm.prg
+stubs.prg
+logger.prg
+wincp.c
+
+# ============================================
+# BMS framework dependencies
+# Add more files here as compilation reveals missing functions
+# ============================================
+
+# ../AVXUTI.PRG
+# ../AVXFUNCS.PRG
