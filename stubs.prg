@@ -1110,14 +1110,18 @@ METHOD Exec( lSeeMessage ) CLASS TheReport
 
    // Call the prep callback (DoSched for scheduling)
    IF ::cbPrepDbf != NIL
+      LogWrite( "TheReport:Exec() - calling cbPrepDbf (DoSched)..." )
       Eval( ::cbPrepDbf, Self )
+      LogWrite( "TheReport:Exec() - cbPrepDbf (DoSched) completed successfully" )
    ENDIF
 
    // Cleanup (from THEREPO.PRG line 329-332)
+   LogWrite( "TheReport:Exec() - cleanup: SetTheDevices, prnKillCrit, scrnPop" )
    SetTheDevices(1)
    prnKillCrit()
    scrnPop()
 
+   LogWrite( "TheReport:Exec() - returning .T." )
 RETURN .T.
 
 // GetUserInfo (real: BMS/USERINFO.PRG)
