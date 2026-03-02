@@ -1110,6 +1110,16 @@ METHOD Exec( lSeeMessage ) CLASS TheReport
       GenOpenFiles(::aDBs)
    ENDIF
 
+   // Apply criteria filter on d_ord BEFORE DoSched.
+   // In the original flow, CreateCondDb filters d_ord through ShaiCond+cbExtraCond
+   // before copying to t_ord. Since we skip CreateCondDb and PrepareGenDb copies
+   // ALL records from d_ord without filtering, we must pre-filter d_ord here.
+   // SET FILTER works because PrepareGenDb's NetUse for t_ordPre fails (file doesn't
+   // exist on first run), so d_ord alias stays pointing to G:\TEST\d_ord with our filter.
+   IF ::aDBs != NIL .AND. Len(::aDBs) > 0 .AND. Select("d_ord") > 0
+      ApplyCriteriaFilter( "d_ord", aBuffer, ::aTstBlocks, ::cbExtraCond )
+   ENDIF
+
    // Call the prep callback (DoSched for scheduling)
    IF ::cbPrepDbf != NIL
       LogWrite( "TheReport:Exec() - calling cbPrepDbf (DoSched)..." )
@@ -2047,6 +2057,54 @@ dbSelectArea(nOldArea)
 LogWrite("GetBuffer_BuildAll: " + cFile + " -> built all-codes buffer (" + LTrim(Str(Len(cResult))) + " chars): " + Left(cResult, 80))
 
 RETURN cResult
+
+// ============================================
+// ApplyCriteriaFilter - Set filter on d_ord to implement criteria filtering
+// In original Clipper flow, CreateCondDb (THEREPO.PRG) filters d_ord through
+// ShaiCond before PrepareGenDb copies records. Since we skip CreateCondDb,
+// we apply the filter here using dbSetFilter with a codeblock.
+// ============================================
+FUNCTION ApplyCriteriaFilter( cAlias, aBuf, aQueryBlks, cbExtra )
+LOCAL nOldArea := Select()
+LOCAL cBuf1, cBuf2, cBuf3, cBuf4
+
+IF aBuf == NIL .OR. Empty(aBuf)
+   LogWrite("ApplyCriteriaFilter: no buffers, skipping filter")
+   RETURN NIL
+ENDIF
+
+// Capture buffer values into LOCAL vars for the filter codeblock
+// (codeblocks capture by reference, so we need stable vars)
+cBuf1 := IIF(Len(aBuf) >= 1, aBuf[1], "")
+cBuf2 := IIF(Len(aBuf) >= 2, aBuf[2], "")
+cBuf3 := IIF(Len(aBuf) >= 3, aBuf[3], "")
+cBuf4 := IIF(Len(aBuf) >= 4, aBuf[4], "")
+
+dbSelectArea(cAlias)
+
+// Build filter: check product type/line/size/value criteria
+// Same logic as QueryBlocks in sch_reqm.prg lines 402-410
+// Purpose/Status (5,6) use {||.T.} in QueryBlocks so we skip them
+// Also apply cbExtraCond (excludes cancelled/completed orders)
+dbSetFilter( {|| ;
+   (Empty(cBuf1) .OR. FieldGet(FieldPos("ptype_id")) $ cBuf1) .AND. ;
+   (Empty(cBuf2) .OR. FieldGet(FieldPos("pline_id")) $ cBuf2) .AND. ;
+   (Empty(cBuf3) .OR. FieldGet(FieldPos("size_id"))  $ cBuf3) .AND. ;
+   (Empty(cBuf4) .OR. Str(FieldGet(FieldPos("value_id")),9,3) $ cBuf4) .AND. ;
+   !(FieldGet(FieldPos("poln_stat")) $ "C_D") .AND. ;
+   (FieldGet(FieldPos("qty_ord")) - FieldGet(FieldPos("qty_canc")) - FieldGet(FieldPos("qty_shipd")) - FieldGet(FieldPos("qty_alloc")) > 0) ;
+} )
+
+dbGoTop()
+
+LogWrite("ApplyCriteriaFilter: filter set on " + cAlias + ;
+         " Buf1=" + Left(cBuf1,20) + ;
+         " Buf2=" + IIF(Empty(cBuf2),"(all)",Left(cBuf2,20)) + ;
+         " RecCount=" + LTrim(Str(RecCount())) + ;
+         " after filter top RecNo=" + LTrim(Str(RecNo())) + " EOF=" + IIF(EOF(),"T","F"))
+
+dbSelectArea(nOldArea)
+RETURN NIL
 
 // ============================================
 // ShaiCond - Test record against criteria (from PRNCRIT.PRG line 4568)
