@@ -61,6 +61,46 @@
 // XREAD - extended READ with keyboard handling
 #translate XREAD => READ
 
+// NETCLOSE - close a database alias
+#command NETCLOSE <alias> => <alias>->( dbCloseArea() )
+
+// ============================================
+// Check box GET (from CHECKS.CH / CHECKDEF.CH)
+// ============================================
+#define CHECK_BOX "X"
+#define CHECK_NUM_IVARS 1
+#translate :checkGsb => :cargo\[1\]
+
+#command @ <row>, <col> GET <var> CHECKBOX <cStr>                    ;
+      =>                                                             ;
+         SetPos(<row>, <col>)                                        ;
+         ; Aadd(GetList,                                             ;
+                CheckGetNew({|x| iif(x == NIL, <var>, <var> := x) }, ;
+                     <(var)>, <cStr>))
+
+// ============================================
+// Radio button GET (from RADIOS.CH / RADIODEF.CH)
+// ============================================
+#define RADIO_BUTTON Chr(4)
+#define RADIO_NUM_IVARS 2
+#translate :radioGsb  => :cargo\[1\]
+#translate :radioGets => :cargo\[2\]
+
+#command @ <row>, <col> GET <var>                                ;
+                        RADIO <radios,...>                        ;
+                        [BLOCKS <blk>]                           ;
+      =>                                                         ;
+         SetPos(<row>, <col>)                                    ;
+         ; RadioGets({|x| iif(x == NIL, <var>, <var> := x) },   ;
+                     <(var)>, <radios>, GetList , <blk>)         ;
+         ; DrawRadios(GetList, Atail(GetList))
+
+// ============================================
+// Misc BMS defines
+// ============================================
+#define FRAMECAPTION  Chr(201)+Chr(205)+Chr(187)+Chr(186)+Chr(188)+Chr(205)+Chr(200)+Chr(186)
+#define ALERT_WARN    "W+/R, W+/B"
+
 // REQUEST for ADS and codepage
 REQUEST DBFCDX
 REQUEST ADS

@@ -5,8 +5,37 @@
  * Provides stubs for missing externals
  */
 
-#include "common.ch"
-#include "fileio.ch"
+#include "avxdefs.ch"
+
+// ============================================
+// ALL STATIC declarations must be at file top in Harbour
+// ============================================
+
+// Screen push/pop stack
+STATIC aScrnStack := {}
+
+// PrnFace state (from PRNFACE.PRG)
+STATIC aSort_pf, aCut_pf, aCutDefault_pf
+STATIC aCutIndicators_pf
+STATIC cSortType_pf
+STATIC cDeviceType_pf
+STATIC aCheckBlocks_pf
+STATIC cUserMsg_pf
+STATIC nDevices_pf := 1
+
+// Criteria buffers (from PRNCRIT.PRG)
+STATIC cProductType_pf
+STATIC cProductLine_pf
+STATIC cSize_pf
+STATIC cValue_pf
+STATIC cPurpose_pf
+STATIC cBstat_pf
+STATIC cESNXX_pf
+STATIC cBuffer_pf
+STATIC aRecNos_pf
+STATIC oBro_pf
+
+// ============================================
 
 // Set Hebrew CP862 BEFORE Harbour GT initializes
 INIT PROCEDURE SetHebCP862()
@@ -766,6 +795,26 @@ FUNCTION xDbUnLock( cDbf )
    ENDIF
 RETURN NIL
 
+// --- Screen Push/Pop Stack (from LIB/SCRNPP.PRG) ---
+
+PROCEDURE scrnPush( t, l, b, r, lScroll )
+   DEFAULT t TO 0, l TO 0, b TO 24, r TO 79, lScroll TO .F.
+   AAdd(aScrnStack, { t, l, b, r, SaveScreen(t, l, b, r) })
+   IF lScroll
+      Scroll(t, l, b, r)
+   ENDIF
+RETURN
+
+PROCEDURE scrnPop()
+LOCAL aScreenData
+   IF Empty(aScrnStack)
+      RETURN
+   ENDIF
+   aScreenData := ATail(aScrnStack)
+   ASize(aScrnStack, Len(aScrnStack) - 1)
+   RestScreen(aScreenData[1], aScreenData[2], aScreenData[3], aScreenData[4], aScreenData[5])
+RETURN
+
 // --- UI Functions ---
 
 // Msg24 (real: BMS/LIB/MSGKEYS.PRG)
@@ -883,6 +932,7 @@ CREATE CLASS TheReport
    VAR cReportName       // Report name
    VAR cRepTitle         // Report title
    VAR cSubTitle         // Sub title
+   VAR aSubtiltle        // Sub titles array
    VAR cRepDbf           // Name used in report design
    VAR cPrepDbf          // Name of prep DB
    VAR cPrepShort        // Short prep
@@ -930,9 +980,11 @@ CREATE CLASS TheReport
    METHOD SetTitles( a )      INLINE ::aTitles := a
    METHOD SetCrit( a )        INLINE ( ::aCritList := a, ::aGetBuffer := a )
    METHOD SetBuffer( a )      INLINE ::aGetBuffer := a
-   METHOD SetCheck( a )       INLINE ( ::aCheckBlocks := a, ::aTstBlocks := a )
+   METHOD SetCheck( a )       INLINE ::aCheckBlocks := a
    METHOD SetQueryBlocks( a ) INLINE ::aTstBlocks := a
    METHOD SetDB( a )          INLINE ::aDBs := a
+   METHOD SetDest( l )        INLINE ::lDest := l
+   METHOD SetSubTitles( a )   INLINE ::aSubtiltle := a
    METHOD Exec( lSeeMessage )
 END CLASS
 
@@ -947,10 +999,11 @@ METHOD New( cName, cDesc ) CLASS TheReport
    ::lCreateOrp      := .F.
    ::lWeWantDiffMenu := .F.
    ::lUseScope       := .F.
-   ::lDest           := .F.
+   ::lDest           := .T.    // default TRUE in original THEREPO.PRG
    ::aMyBuffer       := {}
    ::aReports        := {}
    ::aHandyArray     := {}
+   ::aSubtiltle      := {}
    ::aXTabCargo      := {}
    ::cTempFileDir    := GetUserInfo():cTempDir
    ::nSmartCriteria  := 0
@@ -958,31 +1011,73 @@ METHOD New( cName, cDesc ) CLASS TheReport
 RETURN Self
 
 METHOD Exec( lSeeMessage ) CLASS TheReport
-   // Simplified Exec for auto-scheduling (no prnFace UI)
-   // In full BMS, Exec paints criteria selection UI via prnFace()
-   // For AUTOMAIL/batch mode: skip UI, use empty buffers (= select all)
-   LOCAL i
+   // Real Exec from PDC-clean/BMS/THEREPO.PRG line 219
+   // Shows prnFace criteria selection UI, then calls cbPrepDbf (DoSched)
+   LOCAL i, xKey
    PRIVATE aTestBlocks, aBuffer  // MUST be PRIVATE - used by DoSched via GetBuffer/ShaiCond
 
-   LogWrite( "TheReport:Exec() - auto mode, no criteria UI" )
+   LogWrite( "TheReport:Exec() - starting with prnFace UI" )
 
-   // Initialize aMyBuffer with empty strings (= no filter = select all)
+   scrnPush()
+   SetColor("W+/B")
+   CLS
+
+   // Set check blocks for prnFace checkboxes (from THEREPO.PRG line 228)
+   SetCheckBlocks( ::aCheckBlocks )
+
+   // Set devices based on report type (from THEREPO.PRG line 236-245)
+   IF ::cTypeOfReport == "REPORT"
+      SetTheDevices(2)
+   ELSE
+      SetTheDevices(3)
+   ENDIF
+
+   // Show criteria selection screen (from THEREPO.PRG line 249)
+   prnFace( ::aSortList, ::aCritList, {::cReportName, ::cRepTitle}, 1, ::cSubTitle, ::aSuperCriteria, ::lDest )
+
+   // Check if user pressed ESC (from THEREPO.PRG line 264-271)
+   IF LastKey() == K_ESC
+      xKey := Alert( "You pressed ESC.;Do you want to stop?", {"No", "Yes"}, ALERT_WAR )
+      IF xKey == 2
+         SetTheDevices(1)
+         scrnPop()
+         RETURN .F.
+      ENDIF
+   ENDIF
+
+   // Populate aMyBuffer from GetBuffer (from THEREPO.PRG line 276-280)
    ::aMyBuffer := {}
    IF ::aGetBuffer != NIL
       FOR i := 1 TO Len( ::aGetBuffer )
-         AAdd( ::aMyBuffer, "" )
+         AAdd( ::aMyBuffer, GetBuffer( ::aGetBuffer[i] ) )
       NEXT
    ENDIF
+
+   // Get device type (from THEREPO.PRG line 291)
+   ::cDevType := GetDevType()
 
    // Set PRIVATE variables that sch_reqm.prg functions expect
    aTestBlocks := ::aTstBlocks
    aBuffer     := ::aMyBuffer
 
+   LogWrite( "TheReport:Exec() - User selected criteria, calling cbPrepDbf (DoSched)" )
+   LogWrite( "TheReport:Exec() - Sort: " + IIF(GetSortType() != NIL, GetSortType(), "(nil)") )
+   LogWrite( "TheReport:Exec() - DevType: " + IIF(::cDevType != NIL, ::cDevType, "(nil)") )
+   FOR i := 1 TO Len(::aMyBuffer)
+      IF ValType(::aMyBuffer[i]) == "C"
+         LogWrite( "  Buffer[" + LTrim(Str(i)) + "]: " + IIF(Empty(::aMyBuffer[i]), "(all)", Left(::aMyBuffer[i], 60)) )
+      ENDIF
+   NEXT
+
    // Call the prep callback (DoSched for scheduling)
    IF ::cbPrepDbf != NIL
-      LogWrite( "TheReport:Exec() - calling cbPrepDbf (DoSched)" )
       Eval( ::cbPrepDbf, Self )
    ENDIF
+
+   // Cleanup (from THEREPO.PRG line 329-332)
+   SetTheDevices(1)
+   prnKillCrit()
+   scrnPop()
 
 RETURN .T.
 
@@ -1090,24 +1185,697 @@ METHOD Hide() CLASS Form
    ENDIF
 RETURN Self
 
-// GetBuffer (real: BMS/PRNCRIT.PRG line 4453)
-// Returns "" (empty) = no filter = select all records
-// In full BMS, returns user-selected criteria from prnFace UI
-FUNCTION GetBuffer( cCode )
-   HB_SYMBOL_UNUSED( cCode )
+// ============================================
+// PrnFace GUI - Criteria Selection Screen
+// Based on PDC-clean/BMS/PRNFACE.PRG + CHECKS.PRG + RADIOS.PRG + PRNCRIT.PRG
+// ============================================
+
+// ============================================
+// prnFace - Main criteria selection screen (from PRNFACE.PRG line 71)
+// ============================================
+PROCEDURE PrnFace( aSortParams, aCutParams, aRepInfo, nSortDefault, cSubTitle, aSuperCrits, lDest )
+LOCAL i, nLen, j, nHowMany
+LOCAL lHasDefault := .F.
+LOCAL lSuperColor := .F.
+
+DEFAULT nSortDefault TO 0
+DEFAULT lDest TO .T.
+DEFAULT aSuperCrits TO {}
+
+cUserMsg_pf := IIF( cSubTitle == NIL, Space(35), PadR(cSubTitle,35) )
+
+aSort_pf := aSortParams
+IF !Empty(aSort_pf)
+   IF !Empty(nSortDefault)
+      cSortType_pf := aSort_pf[nSortDefault]
+   ENDIF
+ENDIF
+
+aCut_pf := aCutParams
+
+SetKey( K_F7, {|| prnShowCrits() } )
+SetKey( K_TAB, {|| TabGet() } )
+
+@ 0,0 SAY PadC( aRepInfo[2] + " (" + aRepInfo[1] + ")", 80 ) COLOR "GR+/RB"
+@ 24,0 SAY PadR( "Help[F1] Load print[F5] Save print[Shift][F5] View print[F7] Run[PgDn] Exit[Esc]", 80 ) COLOR "GR+/RB"
+
+nLen := Len(aCutParams)
+aCutIndicators_pf := Array(nLen)
+aCutDefault_pf := Array(nLen)
+AFill(aCutIndicators_pf, .F.)
+AFill(aCutDefault_pf, .F.)
+
+IF nDevices_pf == 1
+   // For scheduling: Printer, Screen, SpreadSheet
+ELSEIF nDevices_pf == 2
+   // Report mode
+ELSEIF nDevices_pf == 3
+   // Query mode
+ENDIF
+
+@ 2, 2 SAY "Optional subtitle:" COLOR "W+/B"
+@ 3, 2 GET cUserMsg_pf COLOR GETCOLORS ;
+                        SEND preBlock := {|o| SetCursor(1), .T. } ;
+                        SEND postBlock := {|o| SetCursor(0), .T. }
+
+IF !Empty(aSort_pf)
+   @ 4, 2 SAY "Select sort rule:" COLOR "W+/B"
+   @ 5, 4 GET cSortType_pf RADIO aSort_pf
+ENDIF
+
+IF lDest
+   @ 18, 2 SAY "Select destination:" COLOR "W+/B"
+   IF nDevices_pf == 1 .OR. nDevices_pf == 2
+      cDeviceType_pf := "Printer"
+   ELSEIF nDevices_pf == 3
+      cDeviceType_pf := "Screen"
+   ENDIF
+   @ 19, 4 GET cDeviceType_pf RADIO {"Printer", "Screen", "SpreadSheet"}
+ENDIF
+
+IF !Empty(nLen)
+   @ 2, 45 SAY "Select criteria:" COLOR "W+/B"
+ENDIF
+
+FOR i := 1 TO nLen
+   SetPos(2 + i, 45)
+   nHowMany := ALen(GetList)
+   j := 1
+   lSuperColor := .F.
+   WHILE j <= ALen(aSuperCrits)
+      IF i == aSuperCrits[j]
+         lSuperColor := .T.
+      ENDIF
+      j++
+   END
+   AAdd(GetList, ;
+      CheckGetNew(MakeBlock(aCutIndicators_pf, i), "aCutIndicators_pf[i]", aCut_pf[i], lSuperColor))
+   IF ValType(aCheckBlocks_pf) == "A"
+      ATail(GetList):postBlock := aCheckBlocks_pf[i]
+   ENDIF
+NEXT
+
+READ
+IF Empty(cDeviceType_pf)
+   cDeviceType_pf := "Printer"
+ENDIF
+
+SetKey( K_F7, NIL )
+SetKey( K_TAB, NIL )
+SetKey( K_F2, NIL )
+SetKey( K_F1, NIL )
+
+IF LastKey() == K_ESC
+   SetCursor(0)
+ENDIF
+
+RETURN
+
+// ============================================
+// prnFace helper functions (from PRNFACE.PRG)
+// ============================================
+FUNCTION MakeBlock( aCutInd, i )
+RETURN {|x| IIF(x == NIL, aCutInd[i], aCutInd[i] := x) }
+
+PROCEDURE SetCheckBlocks( aCb )
+   aCheckBlocks_pf := aCb
+RETURN
+
+FUNCTION GetSortType()
+RETURN cSortType_pf
+
+FUNCTION SetSortType( cSrtType )
+RETURN cSortType_pf := cSrtType
+
+FUNCTION GetIndicators()
+RETURN aCutIndicators_pf
+
+FUNCTION GetDevType()
+RETURN cDeviceType_pf
+
+PROCEDURE SetTheDevices( nDev )
+   nDevices_pf := nDev
+RETURN
+
+FUNCTION GetPrintFile()
 RETURN ""
 
-// critBrowse (real: BMS/PRNCRIT.PRG line 2877)
-// Returns "" (empty) = select all, no criteria filter
-FUNCTION critBrowse( o, aParamList, cFile, cIndex, bKeyCol, bNameCol, bFilter )
-   HB_SYMBOL_UNUSED( o )
-   HB_SYMBOL_UNUSED( aParamList )
-   HB_SYMBOL_UNUSED( cFile )
-   HB_SYMBOL_UNUSED( cIndex )
-   HB_SYMBOL_UNUSED( bKeyCol )
-   HB_SYMBOL_UNUSED( bNameCol )
-   HB_SYMBOL_UNUSED( bFilter )
+FUNCTION GetSpreadFile()
 RETURN ""
+
+FUNCTION GetPrinter()
+RETURN ""
+
+FUNCTION prnGetUserMsg()
+RETURN AllTrim(cUserMsg_pf)
+
+// prnShowCrits - View selected criteria (F7 key)
+FUNCTION prnShowCrits()
+LOCAL cScr := SaveScreen()
+LOCAL cMemo := ""
+LOCAL i
+
+IF aCutIndicators_pf != NIL .AND. aCut_pf != NIL
+   FOR i := 1 TO Len(aCutIndicators_pf)
+      IF aCutIndicators_pf[i]
+         cMemo += aCut_pf[i] + ": selected" + Chr(13) + Chr(10)
+      ELSE
+         cMemo += aCut_pf[i] + ": -" + Chr(13) + Chr(10)
+      ENDIF
+   NEXT
+ENDIF
+
+@ 2, 0 CLEAR TO 23, 79
+@ 24, 0 SAY PadC("Arrow keys to scroll, ESC to exit", 80) COLOR "W+/R"
+MemoEdit(cMemo, 2, 0, 23, 79, .F., NIL, 80)
+RestScreen(0, 0, 24, 79, cScr)
+
+RETURN NIL
+
+// TabGet - Tab to next GET group (from PRNFACE.PRG line 803)
+PROCEDURE TabGet()
+LOCAL nLen := Len(GetList), nGetPos, i
+LOCAL cGetName
+LOCAL nDowns := 0
+
+nGetPos := AScan(GetList, {|o| o:hasFocus})
+IF nGetPos == 0
+   RETURN
+ENDIF
+cGetName := GetList[nGetPos]:name
+i := nGetPos
+
+WHILE .T.
+   i++
+   DO CASE
+      CASE i > nLen
+         KEYBOARD Chr(K_CTRL_HOME)
+         GetList[nGetPos]:exitState := GE_TOP
+         EXIT
+      CASE GetList[i]:name == cGetName
+         nDowns++
+      CASE GetList[i]:name != cGetName
+         KEYBOARD Replicate(Chr(K_DOWN), nDowns)
+         GetList[nGetPos]:exitState := GE_DOWN
+         EXIT
+   ENDCASE
+ENDDO
+RETURN
+
+// ============================================
+// Check box GET (from CHECKS.PRG)
+// ============================================
+FUNCTION CheckGetNew( bVar, cVar, cStr, lSuperColor )
+LOCAL oGet
+LOCAL nRow := Row(), nCol := Col()
+
+DEFAULT lSuperColor TO .F.
+
+DevPos(nRow, nCol)
+IF lSuperColor
+   DevOut("[ ]", IIF(IsColor(), "R+/B", "W/N"))
+ELSE
+   DevOut("[ ]", IIF(IsColor(), "GR+/B", "W/N"))
+ENDIF
+
+oGet := GetNew()
+oGet:col := nCol + 4
+oGet:row := nRow
+oGet:name := cVar
+oGet:cargo := Array(CHECK_NUM_IVARS)
+oGet:checkGsb := bVar
+oGet:block := {|| cStr}
+oGet:reader := {|o| CheckReader(o)}
+oGet:colorSpec := "G+/B,G+/R"
+DrawCheck(oGet)
+oGet:display()
+
+RETURN oGet
+
+PROCEDURE CheckReader( oGet )
+   IF GetPreValidate(oGet)
+      oGet:SetFocus()
+      DO WHILE oGet:exitState == GE_NOEXIT
+         IF oGet:typeOut
+            oGet:exitState := GE_ENTER
+         ENDIF
+         DO WHILE oGet:exitState == GE_NOEXIT
+            CheckApplyKey(oGet, InKey(0))
+         ENDDO
+         IF !GetPostValidate(oGet)
+            oGet:exitState := GE_NOEXIT
+         ENDIF
+      ENDDO
+      oGet:KillFocus()
+   ENDIF
+RETURN
+
+PROCEDURE CheckApplyKey( oGet, nKey )
+LOCAL bKeyBlock
+
+IF (bKeyBlock := SetKey(nKey)) != NIL
+   GetDoSetKey(bKeyBlock, oGet)
+   RETURN
+ENDIF
+
+DO CASE
+   CASE nKey == K_UP
+      oGet:exitState := GE_UP
+   CASE nKey == K_SH_TAB
+      oGet:exitState := GE_UP
+   CASE nKey == K_DOWN
+      oGet:exitState := GE_DOWN
+   CASE nKey == K_TAB
+      oGet:exitState := GE_DOWN
+   CASE nKey == K_ENTER
+      oGet:exitState := GE_ENTER
+   CASE nKey == K_SPACE
+      Eval(oGet:checkGsb, !Eval(oGet:checkGsb))
+      IF ValType(oGet:postBlock) == "B"
+         Eval(oGet:postBlock, oGet)
+      ENDIF
+      oGet:changed := .T.
+      DrawCheck(oGet)
+   CASE nKey == K_ESC
+      IF Set(_SET_ESCAPE)
+         oGet:undo()
+         oGet:exitState := GE_ESCAPE
+      ENDIF
+   CASE nKey == K_PGUP
+      oGet:exitState := GE_WRITE
+   CASE nKey == K_PGDN
+      oGet:exitState := GE_WRITE
+   CASE nKey == K_CTRL_HOME
+      oGet:exitState := GE_TOP
+   CASE nKey == K_CTRL_W
+      oGet:exitState := GE_WRITE
+   CASE nKey == K_INS
+      Set(_SET_INSERT, !Set(_SET_INSERT))
+ENDCASE
+RETURN
+
+PROCEDURE DrawCheck( oGet )
+LOCAL lSelected
+LOCAL nSaveRow := Row()
+LOCAL nSaveCol := Col()
+
+IF ValType(oGet:cargo) == "A" .AND. Len(oGet:cargo) == 1
+   lSelected := Eval(oGet:checkGsb)
+ELSE
+   RETURN
+ENDIF
+
+DevPos(oGet:row, oGet:col - 3)
+IF lSelected
+   DevOut(CHECK_BOX, IIF(IsColor(), "G+/B", "N/W"))
+ELSE
+   DevOut(" ", IIF(IsColor(), "GR+/B", "W/N"))
+ENDIF
+
+DevPos(nSaveRow, nSaveCol)
+RETURN
+
+// ============================================
+// Radio button GET (from RADIOS.PRG)
+// ============================================
+FUNCTION RadioGets( bVar, cVar, aChoices, aGetList, aBlocks )
+LOCAL oGet
+LOCAL nRow := Row(), nCol := Col()
+LOCAL nGets := Len(aChoices)
+LOCAL nGet
+LOCAL nStartGet := Len(aGetList) + 1
+
+DEFAULT aBlocks TO {}
+
+FOR nGet := 1 TO nGets
+   DevPos(nRow, nCol)
+   DevOut("( ) ", IIF(IsColor(), "GR+/B", "W/N"))
+
+   oGet := GetNew()
+   AAdd(aGetList, oGet)
+
+   oGet:col := nCol + 4
+   oGet:row := nRow++
+   oGet:name := cVar
+   oGet:block := radioT(aChoices[nGet])
+   oGet:cargo := Array(RADIO_NUM_IVARS)
+   oGet:radioGsb := bVar
+   oGet:radioGets := Array(nGets)
+   AEval(oGet:radioGets, {|x, n| oGet:radioGets[n] := nStartGet + n - 1})
+   oGet:reader := {|o| RadioReader(o, aGetList)}
+   oGet:colorSpec := GETCOLORS
+   IF !Empty(aBlocks) .AND. nGet <= Len(aBlocks)
+      oGet:postBlock := aBlocks[nGet]
+   ENDIF
+   oGet:display()
+NEXT
+
+RETURN oGet
+
+// Return a detached local block (from RADIOS.PRG)
+FUNCTION radioT( c )
+RETURN {|x| c}
+
+PROCEDURE RadioReader( oGet, aGetList )
+   IF GetPreValidate(oGet)
+      oGet:SetFocus()
+      DO WHILE oGet:exitState == GE_NOEXIT
+         IF oGet:typeOut
+            oGet:exitState := GE_ENTER
+         ENDIF
+         DO WHILE oGet:exitState == GE_NOEXIT
+            RadioApplyKey(oGet, InKey(1), aGetList)
+         ENDDO
+         IF !GetPostValidate(oGet)
+            oGet:exitState := GE_NOEXIT
+         ENDIF
+      ENDDO
+      oGet:KillFocus()
+   ENDIF
+RETURN
+
+PROCEDURE RadioApplyKey( oGet, nKey, aGetList )
+LOCAL bKeyBlock
+
+IF (bKeyBlock := SetKey(nKey)) != NIL
+   GetDoSetKey(bKeyBlock, oGet)
+   RETURN
+ENDIF
+
+DO CASE
+   CASE nKey == K_UP
+      oGet:exitState := GE_UP
+   CASE nKey == K_SH_TAB
+      oGet:exitState := GE_UP
+   CASE nKey == K_DOWN
+      oGet:exitState := GE_DOWN
+   CASE nKey == K_TAB
+      oGet:exitState := GE_DOWN
+   CASE nKey == K_ENTER
+      oGet:exitState := GE_ENTER
+   CASE nKey == K_SPACE
+      IF Eval(oGet:radioGsb) == Eval(oGet:block)
+         Eval(oGet:radioGsb, "")
+      ELSE
+         Eval(oGet:radioGsb, Eval(oGet:block))
+      ENDIF
+      oGet:changed := .T.
+      DrawRadios(aGetList, oGet)
+   CASE nKey == K_ESC
+      IF Set(_SET_ESCAPE)
+         oGet:undo()
+         oGet:exitState := GE_ESCAPE
+      ENDIF
+   CASE nKey == K_PGUP
+      oGet:exitState := GE_WRITE
+   CASE nKey == K_PGDN
+      oGet:exitState := GE_WRITE
+   CASE nKey == K_CTRL_HOME
+      oGet:exitState := GE_TOP
+   CASE nKey == K_CTRL_W
+      oGet:exitState := GE_WRITE
+   CASE nKey == K_INS
+      Set(_SET_INSERT, !Set(_SET_INSERT))
+ENDCASE
+RETURN
+
+PROCEDURE DrawRadios( aGetList, oGet )
+LOCAL nRadios := Len(oGet:radioGets)
+LOCAL oGet1, oMarkGet
+LOCAL nSaveRow := Row()
+LOCAL nSaveCol := Col()
+LOCAL nGet
+
+FOR nGet := 1 TO nRadios
+   oGet1 := aGetList[oGet:radioGets[nGet]]
+   DevPos(oGet1:row, oGet1:col - 3)
+   IF Eval(oGet1:radioGsb) == Eval(oGet1:block)
+      DevOut(RADIO_BUTTON, IIF(IsColor(), "G+/B", "N/W"))
+      IF ValType(oGet1:postBlock) == "B"
+         oMarkGet := oGet1
+      ELSE
+         oMarkGet := NIL
+      ENDIF
+   ELSE
+      DevOut(" ", IIF(IsColor(), "GR+/B", "W/N"))
+   ENDIF
+NEXT
+
+IF ValType(oMarkGet) == "O"
+   Eval(oMarkGet:postBlock, oMarkGet)
+ENDIF
+
+DevPos(nSaveRow, nSaveCol)
+RETURN
+
+// ============================================
+// critBrowse - Criteria selection browse dialog (from PRNCRIT.PRG line 2877)
+// Opens a code table, shows TBrowse with [X]/[ ] checkboxes, user selects entries
+// ============================================
+FUNCTION critBrowse( o, aParamList, cFile, cIndex, bKeyCol, bNameCol, bFilter )
+LOCAL aGetList_save
+LOCAL nRow := Row()
+LOCAL nCol := Col()
+LOCAL nKey, ii
+
+DEFAULT bFilter TO ""
+
+IF o:ExitState != GE_NOEXIT
+   RETURN .T.
+ENDIF
+
+IF !Eval(o:checkGsb)
+   prnSetCritBuffer(cFile, .T., o:VarGet())
+   RETURN .T.
+ENDIF
+
+IF ValType(aParamList) != "A"
+   Alert("No params in criterion", {" OK "})
+   RETURN .F.
+ENDIF
+
+scrnPush()
+
+IF NetUse(cFile, 5)
+   IF cIndex != NIL .AND. !Empty(cIndex)
+      (cFile)->(ordSetFocus(cIndex))
+   ENDIF
+ELSE
+   scrnPop()
+   RETURN .F.
+ENDIF
+
+IF !Empty(bFilter)
+   (cFile)->(dbSetFilter(bFilter))
+   (cFile)->(dbGoTop())
+ENDIF
+
+IF (cFile)->(Eof()) .AND. (cFile)->(Bof())
+   prnSetCritBuffer(cFile, .T., o:VarGet())
+   Eval(o:checkGsb, .F.)
+   NETCLOSE(cFile)
+   Tone(400, 1)
+   scrnPop()
+   RETURN .F.
+ELSE
+   aRecNos_pf := Array((cFile)->(LastRec()))
+ENDIF
+
+IF aParamList[1] == "all"
+   AFill(aRecNos_pf, "[X]")
+ELSE
+   AFill(aRecNos_pf, "[ ]")
+ENDIF
+
+oBro_pf := (cFile)->(TBrowseDB(2, 2, 15, 78))
+
+DispBox(1, 1, 19, 79, B_SINGLE + " ")
+
+oBro_pf:addColumn(TBColumnNew("*", {|| aRecNos_pf[(cFile)->(RecNo())]}))
+oBro_pf:addColumn(TBColumnNew("   ", bKeyCol))
+oBro_pf:addColumn(TBColumnNew("Description                                                 ", bNameCol))
+
+@ 17, 3 SAY PadR("Select/Unselect:[Space] Select All:[F7]  Unselect All:[Shift]+[F7] ", 75) COLOR "GR+/RB"
+@ 18, 3 SAY PadR("Invert Selection:[Alt]+[F7]  Up/Down:Arrows  Exit:[Enter]", 75) COLOR "GR+/RB"
+
+// Browse loop (from prnShow in PRNCRIT.PRG)
+WHILE .T.
+   WHILE !oBro_pf:stabilize() ; ENDDO
+
+   nKey := InKey(0)
+
+   IF nKey == K_ESC
+      AFill(aRecNos_pf, "[ ]")
+      EXIT
+   ELSEIF StdKeys(nKey, oBro_pf)
+      // handled
+   ELSEIF nKey == K_ENTER
+      EXIT
+   ELSEIF nKey == K_F7   // mark all
+      AFill(aRecNos_pf, "[X]")
+      oBro_pf:refreshAll()
+   ELSEIF nKey == K_SH_F7  // unmark all
+      AFill(aRecNos_pf, "[ ]")
+      oBro_pf:refreshAll()
+   ELSEIF nKey == K_ALT_F7  // invert
+      FOR ii := 1 TO Len(aRecNos_pf)
+         IF aRecNos_pf[ii] == "[X]"
+            aRecNos_pf[ii] := "[ ]"
+         ELSE
+            aRecNos_pf[ii] := "[X]"
+         ENDIF
+      NEXT
+      oBro_pf:refreshAll()
+   ELSEIF nKey == K_SPACE
+      IF aRecNos_pf[(cFile)->(RecNo())] == "[X]"
+         aRecNos_pf[(cFile)->(RecNo())] := "[ ]"
+      ELSE
+         aRecNos_pf[(cFile)->(RecNo())] := "[X]"
+      ENDIF
+      oBro_pf:refreshCurrent()
+   ENDIF
+ENDDO
+
+IF LastKey() == K_ENTER
+   cBuffer_pf := ""
+   (cFile)->(DbGoTop())
+   WHILE !(cFile)->(Eof())
+      IF aRecNos_pf[(cFile)->(RecNo())] == "[X]"
+         cBuffer_pf += Eval(bKeyCol) + "_"
+      ENDIF
+      (cFile)->(DbSkip())
+   ENDDO
+   prnSetCritBuffer(cFile, .F., o:VarGet())
+ELSE
+   cBuffer_pf := ""
+   prnSetCritBuffer(cFile, .T., o:VarGet())
+   Eval(o:checkGsb, .F.)
+ENDIF
+
+NETCLOSE(cFile)
+scrnPop()
+SetPos(nRow, nCol)
+RETURN .T.
+
+// ============================================
+// prnSetCritBuffer - Store criteria buffer into static vars (from PRNCRIT.PRG line 2978)
+// Only handles the criteria types used by SCH_REQM
+// ============================================
+PROCEDURE prnSetCritBuffer( cFile, lCode, cBUFF )
+DO CASE
+   CASE cFile == "c_ptype" .OR. cFile == "Product type"
+      IF lCode
+         cProductType_pf := ""
+      ELSE
+         cProductType_pf := cBuffer_pf
+      ENDIF
+   CASE cFile == "c_pline" .OR. cFile == "Product line"
+      IF lCode
+         cProductLine_pf := ""
+      ELSE
+         cProductLine_pf := cBuffer_pf
+      ENDIF
+   CASE cFile == "c_size" .OR. cFile == "Size"
+      IF lCode
+         cSize_pf := ""
+      ELSE
+         cSize_pf := cBuffer_pf
+      ENDIF
+   CASE cFile == "c_value" .OR. cFile == "Value"
+      IF lCode
+         cValue_pf := ""
+      ELSE
+         cValue_pf := cBuffer_pf
+      ENDIF
+   CASE cFile == "c_bpurp" .OR. cFile == "Purpose"
+      IF lCode
+         cPurpose_pf := ""
+      ELSE
+         cPurpose_pf := cBuffer_pf
+      ENDIF
+   CASE cFile == "c_bstat" .OR. cFile == "Status"
+      IF lCode
+         cBstat_pf := ""
+      ELSE
+         cBstat_pf := cBuffer_pf
+      ENDIF
+   CASE cFile == "c_esnxx" .OR. cFile == "ESN(XX)"
+      IF lCode
+         cESNXX_pf := ""
+      ELSE
+         cESNXX_pf := cBuffer_pf
+      ENDIF
+ENDCASE
+RETURN
+
+// ============================================
+// prnKillCrit - Reset all criteria static vars (from PRNCRIT.PRG line 226)
+// ============================================
+PROCEDURE prnKillCrit()
+cProductType_pf := NIL
+cProductLine_pf := NIL
+cSize_pf := NIL
+cValue_pf := NIL
+cPurpose_pf := NIL
+cBstat_pf := NIL
+cESNXX_pf := NIL
+cBuffer_pf := NIL
+aRecNos_pf := NIL
+oBro_pf := NIL
+RETURN
+
+// ============================================
+// GetBuffer - Return criteria value by code name (from PRNCRIT.PRG line 4453)
+// Only handles the criteria types used by SCH_REQM
+// ============================================
+FUNCTION GetBuffer( cCode )
+LOCAL aSource := { "c_ptype", "c_pline", "c_size", "c_value", "c_bpurp", "c_bstat", "c_esnxx" }
+LOCAL aTitle  := { "Product type", "Product line", "Size", "Value", "Purpose", "Status", "ESN(XX)" }
+LOCAL aRet    := { cProductType_pf, cProductLine_pf, cSize_pf, cValue_pf, cPurpose_pf, cBstat_pf, cESNXX_pf }
+LOCAL n, uRet := ""
+
+DO CASE
+   CASE (n := AScan(aSource, cCode)) > 0
+      uRet := aRet[n]
+   CASE (n := AScan(aTitle, cCode)) > 0
+      uRet := aRet[n]
+   OTHERWISE
+      LogWrite("GetBuffer: criterion not found: " + cCode)
+      uRet := ""
+END
+
+IF uRet == NIL
+   uRet := ""
+ENDIF
+
+RETURN uRet
+
+// ============================================
+// ShaiCond - Test record against criteria (from PRNCRIT.PRG line 4568)
+// ============================================
+FUNCTION ShaiCond( aTestBlks, oScrl, cField, lReport )
+LOCAL aIndic
+LOCAL nLen, nTrues := 0, i
+
+DEFAULT lReport TO .T.
+
+aIndic := GetIndicators()
+IF aIndic == NIL
+   RETURN .T.
+ENDIF
+nLen := Len(aIndic)
+
+FOR i := 1 TO nLen
+   IF aIndic[i]
+      IF Eval(aTestBlks[i])
+         nTrues++
+      ENDIF
+   ELSE
+      nTrues++
+   ENDIF
+NEXT
+
+RETURN (nTrues == nLen)
 
 // SchedBr (real: BMS/SCH_FORM.PRG)
 CREATE CLASS SchedBr
