@@ -19,6 +19,11 @@
 // ADS CDX compatibility (maps DBFCDXAX commands to Harbour ADS)
 #include "dbfcdxax.ch"
 
+// DBFCDXAX RDD name mapping for DBCREATE/DBUSEAREA calls
+// In Clipper, DBFCDXAX was a real RDD. In Harbour, local files use DBFCDX.
+// Temp files are always local, so DBFCDXAX -> DBFCDX for DBCREATE.
+#xtranslate DBCREATE( <file>, <struct>, "DBFCDXAX" ) => DBCREATE( <file>, <struct>, "DBFCDX" )
+
 // LFNLIB stub (not needed in Harbour - native LFN support)
 // #include "LFNLIB.ch"
 
