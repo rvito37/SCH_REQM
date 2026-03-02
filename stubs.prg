@@ -1811,6 +1811,7 @@ RETURN .T.
 // Only handles the criteria types used by SCH_REQM
 // ============================================
 PROCEDURE prnSetCritBuffer( cFile, lCode, cBUFF )
+LOCAL cAllBuf
 LogWrite("prnSetCritBuffer: file=" + cFile + " lCode=" + IIF(lCode, "T", "F") + ;
          " cBuffer_pf=" + Left(IIF(cBuffer_pf != NIL, cBuffer_pf, "(nil)"), 60))
 DO CASE
@@ -1857,6 +1858,27 @@ DO CASE
          cESNXX_pf := cBuffer_pf
       ENDIF
 ENDCASE
+
+// When lCode=.T. (all selected / ESC), build the all-codes buffer now
+// while the lookup table is still open (critBrowse hasn't closed it yet).
+// This avoids GetBuffer_BuildAll having to open the table later.
+IF lCode .AND. Select(cFile) > 0
+   LogWrite("prnSetCritBuffer: pre-building all-codes buffer for " + cFile)
+   // Reuse GetBuffer_BuildAll which handles the table scanning
+   cAllBuf := GetBuffer_BuildAll( cFile )
+   IF !Empty(cAllBuf)
+      DO CASE
+         CASE cFile == "c_ptype" ; cProductType_pf := cAllBuf
+         CASE cFile == "c_pline" ; cProductLine_pf := cAllBuf
+         CASE cFile == "c_size"  ; cSize_pf := cAllBuf
+         CASE cFile == "c_value" ; cValue_pf := cAllBuf
+         CASE cFile == "c_bpurp" ; cPurpose_pf := cAllBuf
+         CASE cFile == "c_bstat" ; cBstat_pf := cAllBuf
+         CASE cFile == "c_esnxx" ; cESNXX_pf := cAllBuf
+      ENDCASE
+   ENDIF
+ENDIF
+
 RETURN
 
 // ============================================
@@ -1878,6 +1900,11 @@ RETURN
 // ============================================
 // GetBuffer - Return criteria value by code name (from PRNCRIT.PRG line 4453)
 // Only handles the criteria types used by SCH_REQM
+//
+// When a checkbox is OFF (all selected), the STATIC value is "" or NIL.
+// The caller uses  code $ GetBuffer("xxx")  to test membership.
+// Since  "XX" $ ""  = .F., we must build a buffer containing ALL codes
+// from the lookup table so the $ operator returns .T. for every valid code.
 // ============================================
 FUNCTION GetBuffer( cCode )
 LOCAL aSource := { "c_ptype", "c_pline", "c_size", "c_value", "c_bpurp", "c_bstat", "c_esnxx" }
@@ -1899,7 +1926,103 @@ IF uRet == NIL
    uRet := ""
 ENDIF
 
+// When buffer is empty (checkbox OFF = "all"), build buffer with ALL codes
+// from the lookup table so that  code $ buffer  always returns .T.
+// Cache the result in the STATIC so we don't rebuild on every call.
+IF Empty(uRet)
+   uRet := GetBuffer_BuildAll( cCode )
+   // Cache the built buffer back into the STATIC var
+   IF !Empty(uRet)
+      DO CASE
+         CASE n == 1 ; cProductType_pf := uRet
+         CASE n == 2 ; cProductLine_pf := uRet
+         CASE n == 3 ; cSize_pf := uRet
+         CASE n == 4 ; cValue_pf := uRet
+         CASE n == 5 ; cPurpose_pf := uRet
+         CASE n == 6 ; cBstat_pf := uRet
+         CASE n == 7 ; cESNXX_pf := uRet
+      ENDCASE
+   ENDIF
+ENDIF
+
 RETURN uRet
+
+// ============================================
+// GetBuffer_BuildAll - Build a buffer string containing ALL codes from a lookup table
+// Called when checkbox is OFF (all selected) so the $ operator matches everything.
+// Opens the table itself if not already open.
+// ============================================
+STATIC FUNCTION GetBuffer_BuildAll( cCode )
+LOCAL cFile, cKeyField, cResult := "", nOldArea, nOldRec
+LOCAL lOpened := .F.
+
+// Map criterion name to table name and key field
+DO CASE
+   CASE cCode == "c_ptype" .OR. cCode == "Product type"
+      cFile := "c_ptype"
+      cKeyField := "ptype_id"
+   CASE cCode == "c_pline" .OR. cCode == "Product line"
+      cFile := "c_pline"
+      cKeyField := "pline_id"
+   CASE cCode == "c_size"  .OR. cCode == "Size"
+      cFile := "c_size"
+      cKeyField := "size_id"
+   CASE cCode == "c_value" .OR. cCode == "Value"
+      cFile := "c_value"
+      cKeyField := "value_id"
+   CASE cCode == "c_bpurp" .OR. cCode == "Purpose"
+      cFile := "c_bpurp"
+      cKeyField := "b_purp"
+   CASE cCode == "c_bstat" .OR. cCode == "Status"
+      cFile := "c_bstat"
+      cKeyField := "b_stat"
+   CASE cCode == "c_esnxx" .OR. cCode == "ESN(XX)"
+      cFile := "c_esnxx"
+      cKeyField := "esnxx_id"
+   OTHERWISE
+      RETURN ""
+ENDCASE
+
+nOldArea := Select()
+
+// Open the table if not already open
+IF Select(cFile) == 0
+   BEGIN SEQUENCE
+      NetUse(cFile, 5)
+      lOpened := .T.
+      LogWrite("GetBuffer_BuildAll: opened " + cFile + " for all-codes scan")
+   RECOVER
+      LogWrite("GetBuffer_BuildAll: WARNING - cannot open " + cFile + ", returning empty")
+      dbSelectArea(nOldArea)
+      RETURN ""
+   END SEQUENCE
+ELSE
+   dbSelectArea(cFile)
+ENDIF
+
+nOldRec := RecNo()
+dbGoTop()
+DO WHILE !EOF()
+   IF cKeyField == "value_id"
+      // Match critBrowse format: Str(value_id, 9, 3)
+      cResult += Str(FieldGet(FieldPos(cKeyField)), 9, 3) + "_"
+   ELSE
+      // Match critBrowse format: raw field value (no trim, same as Eval(bKeyCol))
+      cResult += FieldGet(FieldPos(cKeyField)) + "_"
+   ENDIF
+   dbSkip()
+ENDDO
+dbGoto(nOldRec)
+
+// Close the table if we opened it (don't close if it was already open)
+IF lOpened
+   dbCloseArea()
+ENDIF
+
+dbSelectArea(nOldArea)
+LogWrite("GetBuffer_BuildAll: " + cFile + " -> built all-codes buffer (" + LTrim(Str(Len(cResult))) + " chars): " + Left(cResult, 80))
+
+RETURN cResult
 
 // ============================================
 // ShaiCond - Test record against criteria (from PRNCRIT.PRG line 4568)
