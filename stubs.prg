@@ -1688,9 +1688,11 @@ IF o:ExitState != GE_NOEXIT
 ENDIF
 
 IF !Eval(o:checkGsb)
+   LogWrite("critBrowse: checkbox OFF for " + cFile + " - setting (all)")
    prnSetCritBuffer(cFile, .T., o:VarGet())
    RETURN .T.
 ENDIF
+LogWrite("critBrowse: checkbox ON for " + cFile + " - opening browse")
 
 IF ValType(aParamList) != "A"
    Alert("No params in criterion", {" OK "})
@@ -1788,9 +1790,11 @@ IF LastKey() == K_ENTER
       ENDIF
       (cFile)->(DbSkip())
    ENDDO
+   LogWrite("critBrowse: " + cFile + " Enter pressed, cBuffer_pf=" + Left(cBuffer_pf, 80))
    prnSetCritBuffer(cFile, .F., o:VarGet())
 ELSE
    cBuffer_pf := ""
+   LogWrite("critBrowse: " + cFile + " ESC pressed, setting (all)")
    prnSetCritBuffer(cFile, .T., o:VarGet())
    Eval(o:checkGsb, .F.)
 ENDIF
@@ -1805,6 +1809,8 @@ RETURN .T.
 // Only handles the criteria types used by SCH_REQM
 // ============================================
 PROCEDURE prnSetCritBuffer( cFile, lCode, cBUFF )
+LogWrite("prnSetCritBuffer: file=" + cFile + " lCode=" + IIF(lCode, "T", "F") + ;
+         " cBuffer_pf=" + Left(IIF(cBuffer_pf != NIL, cBuffer_pf, "(nil)"), 60))
 DO CASE
    CASE cFile == "c_ptype" .OR. cFile == "Product type"
       IF lCode
