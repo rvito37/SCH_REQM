@@ -101,6 +101,11 @@
 #define FRAMECAPTION  Chr(201)+Chr(205)+Chr(187)+Chr(186)+Chr(188)+Chr(205)+Chr(200)+Chr(186)
 #define ALERT_WARN    "W+/R, W+/B"
 
+// Field declarations for custom fields added by PrepareGenDb
+// These are needed so Harbour resolves (alias)->Sched_source as field access
+// not memvar access. DBF truncates to 10 chars: Sched_sour, Sched_Grou
+FIELD Sched_source, Sched_Group_Seq
+
 // REQUEST for ADS and codepage
 REQUEST DBFCDX
 REQUEST ADS
