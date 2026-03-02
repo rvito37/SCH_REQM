@@ -1069,6 +1069,13 @@ METHOD Exec( lSeeMessage ) CLASS TheReport
       ENDIF
    NEXT
 
+   // Open the main database(s) before calling prep callback
+   // In original flow, CreateCondDb does GenOpenFiles({::aDbs[1]}) at THEREPO line 742
+   // Since we call DoSched directly (skipping CreateCondDb), we must open d_ord here
+   IF ::aDBs != NIL .AND. Len(::aDBs) > 0
+      GenOpenFiles(::aDBs)
+   ENDIF
+
    // Call the prep callback (DoSched for scheduling)
    IF ::cbPrepDbf != NIL
       Eval( ::cbPrepDbf, Self )
