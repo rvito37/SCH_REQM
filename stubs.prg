@@ -1994,11 +1994,13 @@ FUNCTION IfInDTRange( aValues, nValue )
 RETURN .T.
 
 // GetHie_2 (real: BMS/SCH_ORDM.PRG line 953)
+// Returns hierarchy level as string. Used in index keys (concatenated with b_id)
+// and val() comparisons. Looks up c_hierar by tol_id+volt_id+tc_id.
 FUNCTION GetHie_2( tol_id, volt_id, tc_id )
    HB_SYMBOL_UNUSED( tol_id )
    HB_SYMBOL_UNUSED( volt_id )
    HB_SYMBOL_UNUSED( tc_id )
-RETURN 0
+RETURN "1"
 
 // XSoftCopy (real: BMS/AVXUTI.PRG line 222)
 FUNCTION XSoftCopy( cFields, cTargName, cWhileExp, cForExp, lSDF )
