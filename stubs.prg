@@ -542,6 +542,38 @@ RETURN
 // Include the real .PRG files in sch_reqm.hbp as they become available.
 // ============================================
 
+// --- dbsetindex wrapper for ADS compatibility ---
+// ADS requires table and index files to be on the same server.
+// d_stocktmp.cdx is a temp index that may not exist (created by external modules).
+// This wrapper: 1) checks file exists, 2) catches ADS error 5020 gracefully.
+FUNCTION SafeDbSetIndex( cIndex )
+LOCAL lOk := .T.
+LOCAL cFile := cIndex
+LOCAL bOldErr
+
+   // Ensure .cdx extension for file check
+   IF !( ".cdx" $ Lower( Right( cFile, 4 ) ) ) .AND. !( ".CDX" $ Right( cFile, 4 ) )
+      cFile := cFile + ".cdx"
+   ENDIF
+
+   IF !FILE( cFile )
+      LogWrite( "SafeDbSetIndex: file not found: " + cFile + " - skipping" )
+      RETURN .F.
+   ENDIF
+
+   // Try to set the index, catch ADS errors (e.g., 5020 cross-server)
+   // Use ordListAdd() directly since dbsetindex is #xtranslated to this function
+   bOldErr := ErrorBlock( {|e| Break(e) } )
+   BEGIN SEQUENCE
+      ordListAdd( cIndex )
+   RECOVER
+      LogWrite( "SafeDbSetIndex: error setting index: " + cFile + " on workarea " + Alias() + " - skipping" )
+      lOk := .F.
+   END SEQUENCE
+   ErrorBlock( bOldErr )
+
+RETURN lOk
+
 // --- Network / Locking (real: BMS/LOCKS.PRG) ---
 
 FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cAlias, lDirectory, cTag )
@@ -1893,15 +1925,40 @@ END CLASS
 METHOD New() CLASS SchedBr
 RETURN Self
 
-// CheckIndex (real: BMS/AVXUTI.PRG line 197)
+// CheckIndex (real: BMS/AVXUTI.PRG line 197 - CheckIndexes)
+// In Clipper, 10-char function name truncation mapped CheckIndex -> CheckIndexes
 FUNCTION CheckIndex( cAlias, cIndex, cKey, lReIndex, cFor, lUni )
-   HB_SYMBOL_UNUSED( cAlias )
-   HB_SYMBOL_UNUSED( cIndex )
-   HB_SYMBOL_UNUSED( cKey )
-   HB_SYMBOL_UNUSED( lReIndex )
-   HB_SYMBOL_UNUSED( cFor )
-   HB_SYMBOL_UNUSED( lUni )
-RETURN .T.
+LOCAL nOldArea := SELECT()
+
+   LogWrite( "CheckIndex: tag=" + cAlias + " idx=" + cIndex + " key=" + cKey + ;
+             " reindex=" + IIF( lReIndex, "T", "F" ) )
+
+   IF !( FILE( cIndex + ".cdx" ) ) .OR. ( lReIndex )
+      IF !Empty( lUni )
+         IF !Empty( cFor )
+            IF ValType( cFor ) == "B"
+               INDEX ON &cKey TAG ( cAlias ) TO ( cIndex ) FOR Eval( cFor ) UNIQUE
+            ELSE
+               INDEX ON &cKey TAG ( cAlias ) TO ( cIndex ) FOR &cFor UNIQUE
+            ENDIF
+         ELSE
+            INDEX ON &cKey TAG ( cAlias ) TO ( cIndex ) UNIQUE
+         ENDIF
+      ELSE
+         IF !Empty( cFor )
+            IF ValType( cFor ) == "B"
+               INDEX ON &cKey TAG ( cAlias ) TO ( cIndex ) FOR Eval( cFor )
+            ELSE
+               INDEX ON &cKey TAG ( cAlias ) TO ( cIndex ) FOR &cFor
+            ENDIF
+         ELSE
+            INDEX ON &cKey TAG ( cAlias ) TO ( cIndex )
+         ENDIF
+      ENDIF
+   ENDIF
+
+   Select( nOldArea )
+RETURN NIL
 
 // --- Business logic stubs ---
 

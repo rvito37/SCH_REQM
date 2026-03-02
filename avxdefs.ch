@@ -113,6 +113,11 @@
 // Also fix the FIELD declaration to use truncated names
 FIELD Sched_sour, Sched_Grou
 
+// dbsetindex wrapper: ADS requires table and index on same server.
+// Temp indexes (d_stocktmp.cdx) may be local while table is on ADS.
+// Route through SafeDbSetIndex() which checks file existence and catches errors.
+#xtranslate dbsetindex( <x> ) => SafeDbSetIndex( <x> )
+
 // REQUEST for ADS and codepage
 REQUEST DBFCDX
 REQUEST ADS
