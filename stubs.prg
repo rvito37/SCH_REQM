@@ -1111,12 +1111,21 @@ METHOD Exec( lSeeMessage ) CLASS TheReport
    ENDIF
 
    // CreateCondDb - create filtered t_ordPre (from THEREPO.PRG line 726)
-   // In original flow, CreateCondDb does:
-   //   COPY TO t_ordPre FOR ShaiCond() .AND. cbExtraCond
-   // Then PrepareGenDb in DoSched opens t_ordPre with alias "d_ord"
-   // and copies those pre-filtered records into t_ord.
+   // Original flow:
+   //   1. GenOpenFiles opens d_ord (line 742)
+   //   2. COPY TO t_ordPre FOR ShaiCond() .AND. cbExtraCond (lines 958-965)
+   //   3. Close d_ord (line 973 in CreateCondDb)
+   //   4. PrepareGenDb opens t_ordPre with alias "d_ord" (sch_reqm line 4574)
+   // We must close d_ord AFTER CreateCondDb so PrepareGenDb can reopen
+   // t_ordPre with alias "d_ord" — otherwise alias conflict prevents opening.
    IF ::cPrepDbf != NIL .AND. ::aDBs != NIL .AND. Len(::aDBs) > 0
       CreateCondDb( Self, ::aDBs[1], aTestBlocks, aBuffer )
+      // Close d_ord after copying — exactly as THEREPO.PRG line 973:
+      //   (cDbf)->(DBCLOSEAREA())
+      IF Select(::aDBs[1]) > 0
+         LogWrite("TheReport:Exec() - closing " + ::aDBs[1] + " after CreateCondDb (THEREPO line 973)")
+         (::aDBs[1])->(dbCloseArea())
+      ENDIF
    ENDIF
 
    // Call the prep callback (DoSched for scheduling)
@@ -2069,7 +2078,6 @@ RETURN cResult
 FUNCTION CreateCondDb( oRep, cDbf, aTstBlks, aBuf )
 LOCAL nOldArea := Select()
 LOCAL cTmpFile := GetUserInfo():cTempDir + oRep:cPrepDbf
-LOCAL nCopied
 
 LogWrite("CreateCondDb: cDbf=" + cDbf + " cPrepDbf=" + oRep:cPrepDbf + ;
          " tmpFile=" + cTmpFile)
@@ -2102,18 +2110,7 @@ COPY TO (cTmpFile) ;
 
 @ 2,0 SAY PadR(" ", 80) COLOR "W+/B"
 
-// Log how many records were copied
-nCopied := 0
-IF FILE(cTmpFile + ".dbf")
-   NetUse(oRep:cPrepDbf, 5, NIL, .F., .T., GetUserInfo():cTempDir)
-   IF Select(oRep:cPrepDbf) > 0
-      nCopied := (oRep:cPrepDbf)->(RecCount())
-      (oRep:cPrepDbf)->(dbCloseArea())
-   ENDIF
-ENDIF
-
-LogWrite("CreateCondDb: copied " + LTrim(Str(nCopied)) + " records to " + cTmpFile + ;
-         " (from " + LTrim(Str(RecCount())) + " in " + cDbf + ")")
+LogWrite("CreateCondDb: COPY TO completed, file exists=" + IIF(FILE(cTmpFile + ".dbf"), "T", "F"))
 
 dbSelectArea(nOldArea)
 RETURN NIL
