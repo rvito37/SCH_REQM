@@ -19,10 +19,12 @@
 // ADS CDX compatibility (maps DBFCDXAX commands to Harbour ADS)
 #include "dbfcdxax.ch"
 
-// DBFCDXAX RDD name mapping for DBCREATE/DBUSEAREA calls
-// In Clipper, DBFCDXAX was a real RDD. In Harbour, local files use DBFCDX.
-// Temp files are always local, so DBFCDXAX -> DBFCDX for DBCREATE.
+// DBCREATE RDD mapping for local/temp files
+// In Clipper, DBFCDXAX was a real RDD and NIL used the default (DBFCDX).
+// In Harbour, default RDD is ADS (for network), but temp files are local.
+// Map both "DBFCDXAX" and NIL to "DBFCDX" so DBCREATE uses local driver.
 #xtranslate DBCREATE( <file>, <struct>, "DBFCDXAX" ) => DBCREATE( <file>, <struct>, "DBFCDX" )
+#xtranslate DBCREATE( <file>, <struct>, NIL )         => DBCREATE( <file>, <struct>, "DBFCDX" )
 
 // LFNLIB stub (not needed in Harbour - native LFN support)
 // #include "LFNLIB.ch"
