@@ -178,6 +178,12 @@ RETURN AdsSetExact( .T. )
 FUNCTION DBFCDXAX()
 RETURN "ADSCDX"
 
+// GetMyDriver (real: BMS/BMSBAR.PRG line 2372)
+// In standalone mode cMyDriver is always NIL, so returns "ADS"
+// ADS RDD handles both local and remote ADS connections
+FUNCTION GetMyDriver()
+RETURN "ADS"
+
 // ============================================
 // Novell NetWare (fn_*) stubs
 // ============================================
@@ -510,66 +516,196 @@ RETURN
 // --- Network / Locking (real: BMS/LOCKS.PRG) ---
 
 FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cAlias, lDirectory, cTag )
-   LOCAL cFile, lResult
-   DEFAULT nSeconds TO 5
-   DEFAULT lOpenMode TO .F.     // .F. = shared
-   DEFAULT lNewWorkArea TO .T.
-   DEFAULT cDir TO ""
-   DEFAULT cAlias TO cDataBase
-   IF ! Empty( cDir )
-      cFile := cDir + "/" + cDataBase
+   // Real implementation based on PDC-clean/BMS/LOCKS.PRG
+   LOCAL lForever, lRestart := .T., nWaitTime
+   LOCAL cDbfDir
+   LOCAL nAlert
+   LOCAL cLockingUser, aLockingUser := {"", NIL}, nLock
+
+   // Get base directory: from cDir parameter, or from GetUserInfo():cDbfDir
+   IF cDir == NIL
+      cDbfDir := GetUserInfo():cDbfDir
    ELSE
-      cFile := cDataBase
+      cDbfDir := cDir
    ENDIF
-   BEGIN SEQUENCE
-      IF lNewWorkArea
-         dbUseArea( .T., , cFile, cAlias, lOpenMode )
-      ELSE
-         dbUseArea( .F., , cFile, cAlias, lOpenMode )
+
+   // Select RDD driver: DBFCDX for local (C:), ADS for network
+   cDriver := IIF( Left(cDbfDir, 2) $ "C:", "DBFCDX", GetMyDriver() )
+
+   DEFAULT lNewWorkArea TO .T.
+   DEFAULT lOpenMode    TO .T.      // .T. = SHARED
+   DEFAULT nSeconds     TO 5
+
+   IF cDriver == NIL
+      cDriver := GetMyDriver()
+   ENDIF
+
+   lForever := ( nSeconds == 0 )
+
+   LogWrite( "NetUse: " + cDataBase + " driver=" + cDriver + " dir=" + cDbfDir + ;
+             " shared=" + IIF( lOpenMode, "T", "F" ) + " newWA=" + IIF( lNewWorkArea, "T", "F" ) )
+
+   WHILE lRestart
+      nWaitTime := nSeconds
+
+      WHILE ( lForever .OR. nWaitTime > 0 )
+
+         IF ( Select(cDataBase) == 0 ) .OR. ;
+            ( Select(cDataBase) != 0 .AND. cAlias != NIL .AND. Select(cAlias) == 0 )
+            IF Empty(lDirectory)
+               DBUSEAREA( lNewWorkArea, cDriver, (cDbfDir + cDataBase), cAlias, lOpenMode, .F. )
+            ELSE
+               DBUSEAREA( lNewWorkArea, cDriver, (cDataBase), cAlias, lOpenMode, .F. )
+            ENDIF
+         ELSE
+            SELECT Select(cDataBase)
+         ENDIF
+
+         IF ! NetErr()
+            IF ! Empty(cTag)
+               OrdSetFocus( cTag )
+            ENDIF
+            RETURN .T.
+         ENDIF
+         INKEY(1)
+         nWaitTime--
+      ENDDO
+
+      // Lock diagnostics
+      LogWrite( "NetUse RETRY: " + cDataBase + " AXS lock=" + ;
+                IIF( AX_AXSLocking(), "T", "F" ) + ;
+                " locked=" + IIF( AX_IsFlocked(cDataBase), "T", "F" ) + ;
+                " userid=" + LTrim(Str(AX_UserLockId(cDataBase))) )
+
+      aLockingUser := AX_LockOwner( cDataBase + ".dbf", , @nLock )
+
+      IF nLock > 1
+         cLockingUser := aLockingUser[1]
+         IF Empty(cLockingUser)
+            LogWrite( "NetUse: error retrieving lock owner, AX_Error=" + LTrim(Str(AX_Error())) )
+         ENDIF
       ENDIF
-      lResult := .T.
-   RECOVER
-      lResult := .F.
-      LogWrite( "NetUse FAILED: " + cFile + " alias=" + cAlias )
-   END SEQUENCE
-RETURN lResult
+
+      DEFAULT cLockingUser TO ""
+
+      nAlert := Alert( "Cannot open: " + cDataBase + ";" + ;
+                        cLockingUser + " may be locking this file;;" + ;
+                        "Retry?", ;
+                        { "Retry", "Quit" } )
+
+      DO CASE
+      CASE nAlert == 1
+         lRestart := .T.
+      CASE nAlert == 2 .OR. nAlert == 0
+         lRestart := .F.
+      ENDCASE
+   END
+
+   LogWrite( "NetUse FAILED: " + cDataBase )
+RETURN .F.
 
 FUNCTION RecLock( nSeconds, cProc, lUpdate )
-   LOCAL lResult, i
-   DEFAULT nSeconds TO 5
-   DEFAULT cProc TO ""
-   FOR i := 1 TO nSeconds * 2
-      IF RLock()
-         RETURN .T.
-      ENDIF
-      Inkey( 0.5 )
-   NEXT
-   LogWrite( "RecLock FAILED after " + LTrim( Str( nSeconds ) ) + "s, caller=" + cProc )
+   // Real implementation based on PDC-clean/BMS/LOCKS.PRG
+   LOCAL lForever, lRestart := .T., nWaitTime
+   LOCAL cAlias := Alias()
+   LOCAL cLockingUser := ""
+
+   DEFAULT cProc    TO ProcName(1)
+   DEFAULT lUpdate  TO .T.
+   DEFAULT nSeconds TO 0
+
+   lForever := ( nSeconds == 0 )
+
+   WHILE lRestart
+      nWaitTime := nSeconds
+      DO WHILE ( lForever .OR. nWaitTime > 0 )
+         IF (cAlias)->(RLock())
+            // Update audit fields if present
+            IF lUpdate .AND. (cAlias)->(FieldPos("plu_rec")) > 0
+               GetUserInfo():updateUserInRec( cAlias, cProc, .F. )
+            ENDIF
+            RETURN .T.
+         ENDIF
+         INKEY(1)
+         nWaitTime--
+      ENDDO
+      DEFAULT cLockingUser TO ""
+      LogWrite( "RecLock RETRY: " + cAlias + " AXS lock=" + ;
+                IIF( AX_AXSLocking(), "T", "F" ) + ;
+                " locked=" + IIF( AX_IsFlocked(cAlias), "T", "F" ) )
+      cLockingUser := fn_WhoAmI()
+      lRestart := Alert( "Record locked in " + cAlias + ";" + ;
+                          cLockingUser + " may be using this record;;" + ;
+                          "Retry?", ;
+                          { "Retry", "Cancel" } ) == 1
+   END
 RETURN .F.
 
 FUNCTION AddRec( nWaitSeconds, cCallingProc )
-   LOCAL lResult, i
-   DEFAULT nWaitSeconds TO 5
-   DEFAULT cCallingProc TO ""
-   FOR i := 1 TO nWaitSeconds * 2
-      dbAppend()
-      IF ! NetErr()
-         RETURN .T.
+   // Real implementation based on PDC-clean/BMS/LOCKS.PRG
+   LOCAL cAlias := Alias()
+   LOCAL lForever, lRestart := .T., nWaitTime
+   LOCAL cLockingUser := ""
+
+   DEFAULT nWaitSeconds  TO 5
+   DEFAULT cCallingProc  TO ProcName(1)
+
+   dbAppend()
+
+   IF ! NetErr()
+      // Update audit fields if table has them
+      IF (cAlias)->(FieldPos("dlu_rec")) > 0
+         GetUserInfo():updateUserInRec( cAlias, cCallingProc, .T. )
       ENDIF
-      Inkey( 0.5 )
-   NEXT
-   LogWrite( "AddRec FAILED after " + LTrim( Str( nWaitSeconds ) ) + "s, caller=" + cCallingProc )
+      RETURN .T.
+   ENDIF
+
+   lForever := ( nWaitSeconds == 0 )
+
+   WHILE lRestart
+      nWaitTime := nWaitSeconds
+      WHILE ( lForever .OR. nWaitTime > 0 )
+         dbAppend()
+         IF ! NetErr()
+            RETURN .T.
+         ENDIF
+         INKEY(1)
+         nWaitTime--
+      ENDDO
+      DEFAULT cLockingUser TO ""
+      lRestart := Alert( "Cannot append to " + cAlias + ";" + ;
+                          "Table may be locked;;" + ;
+                          "Retry?", ;
+                          { "Retry", "Cancel" } ) == 1
+   END
 RETURN .F.
 
 FUNCTION FilLock( nSeconds )
-   LOCAL i
-   DEFAULT nSeconds TO 5
-   FOR i := 1 TO nSeconds * 2
-      IF FLock()
-         RETURN .T.
-      ENDIF
-      Inkey( 0.5 )
-   NEXT
+   // Real implementation based on PDC-clean/BMS/LOCKS.PRG
+   LOCAL lForever, lRestart := .T., nWaitTime
+   LOCAL cLockingUser := ""
+
+   IF FLock()
+      RETURN .T.
+   ENDIF
+
+   lForever := ( nSeconds == 0 )
+
+   WHILE lRestart
+      nWaitTime := nSeconds
+      DO WHILE ( lForever .OR. nWaitTime > 0 )
+         INKEY(1)
+         nWaitTime--
+         IF FLock()
+            RETURN .T.
+         ENDIF
+      ENDDO
+      DEFAULT cLockingUser TO ""
+      lRestart := Alert( "File lock failed;" + ;
+                          "Table may be in use;;" + ;
+                          "Retry?", ;
+                          { "Retry", "Cancel" } ) == 1
+   END
 RETURN .F.
 
 // --- File Management (real: BMS/AVXUTI.PRG) ---
@@ -750,17 +886,66 @@ METHOD Exec( lFlag ) CLASS TheReport
    ENDIF
 RETURN lResult
 
-// GetUserInfo (real: BMS/AVXBMS.PRG line 406)
+// GetUserInfo (real: BMS/USERINFO.PRG)
 CREATE CLASS GetUserInfoClass
+   VAR cDbfDir
    VAR cTempDir
-   VAR cUser
+   VAR cUserId
+   VAR cGroupId
+   VAR cWIPCardNo
+   VAR cMapDir
+   VAR cPrnDir
    METHOD New()
+   METHOD updateUserInRec( cFileName, cProgName, lNewRec )
 END CLASS
 
 METHOD New() CLASS GetUserInfoClass
-   ::cTempDir := hb_DirTemp() + "/"
-   ::cUser := fn_WhoAmI()
+   // cDbfDir = base path for all DBF files on ADS server
+   // This matches SET DEFAULT in main.prg — must end with backslash
+   LOCAL cDefPath := SET( _SET_DEFAULT )
+   IF ! Empty( cDefPath )
+      IF !( Right( cDefPath, 1 ) $ "/\" )
+         cDefPath += "\"
+      ENDIF
+      ::cDbfDir := cDefPath
+   ELSE
+      ::cDbfDir := "G:\AVXBMS\"
+   ENDIF
+   ::cTempDir    := hb_DirTemp() + "\"
+   ::cUserId     := fn_WhoAmI()
+   ::cGroupId    := ""
+   ::cWIPCardNo  := "000000000000"
+   ::cMapDir     := ""
+   ::cPrnDir     := ""
+   LogWrite( "GetUserInfo:New() cDbfDir=" + ::cDbfDir + " cUserId=" + ::cUserId )
 RETURN Self
+
+METHOD updateUserInRec( cFileName, cProgName, lNewRec ) CLASS GetUserInfoClass
+   DEFAULT lNewRec TO .F.
+   IF lNewRec
+      IF (cFileName)->(FieldPos("dadd_rec")) > 0
+         (cFileName)->dadd_rec := Date()
+      ENDIF
+      IF (cFileName)->(FieldPos("tadd_rec")) > 0
+         (cFileName)->tadd_rec := Left( Time(), 5 )
+      ENDIF
+   ENDIF
+   IF (cFileName)->(FieldPos("dlu_rec")) > 0
+      (cFileName)->dlu_rec := Date()
+   ENDIF
+   IF (cFileName)->(FieldPos("tlu_rec")) > 0
+      (cFileName)->tlu_rec := Time()
+   ENDIF
+   IF (cFileName)->(FieldPos("ulu_rec")) > 0
+      (cFileName)->ulu_rec := ::cUserId
+   ENDIF
+   IF (cFileName)->(FieldPos("wlu_rec")) > 0
+      (cFileName)->wlu_rec := ::cWIPCardNo
+   ENDIF
+   IF (cFileName)->(FieldPos("plu_rec")) > 0
+      (cFileName)->plu_rec := Upper( cProgName )
+   ENDIF
+RETURN NIL
 
 FUNCTION GetUserInfo()
    STATIC s_oInfo
