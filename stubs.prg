@@ -2124,7 +2124,7 @@ RETURN NIL
 FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
 LOCAL cTempDir := GetUserInfo():cTempDir
-LOCAL cIdxFile := cTempDir + "d_stocktmp"
+LOCAL cIdxFile := cTempDir + "d_stockt"
 
 LogWrite("SchedIndex: starting, cTempDir=" + cTempDir)
 
@@ -2179,7 +2179,14 @@ INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
 LogWrite("SchedIndex: tag U_viva_06 created")
 
-LogWrite("SchedIndex: completed, file exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
+LogWrite("SchedIndex: completed, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
+
+// sch_reqm.prg references "d_stocktmp.cdx" (line 581) — copy d_stockt.cdx to d_stocktmp.cdx
+// so both names work (original schedindex created d_stockt, sch_reqm expects d_stocktmp)
+IF FILE(cIdxFile + ".cdx")
+   COPY FILE (cIdxFile + ".cdx") TO (cTempDir + "d_stocktmp.cdx")
+   LogWrite("SchedIndex: copied d_stockt.cdx -> d_stocktmp.cdx")
+ENDIF
 
 dbSelectArea(nOldArea)
 RETURN NIL
