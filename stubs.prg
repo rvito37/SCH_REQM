@@ -1968,6 +1968,15 @@ RETURN NIL
 
 // --- Business logic stubs ---
 
+// GetSeqBstat / GetSeqPurp - return sort sequence for business status/purpose
+// Used in INDEX ON key at PreAvail(817). Original functions likely seek in c_bstat/c_bpurp
+// and return a seq_no field. Returning the code itself gives alphabetical ordering.
+FUNCTION GetSeqBstat( cBstat )
+RETURN IIF( cBstat == NIL, "", cBstat )
+
+FUNCTION GetSeqPurp( cPurp )
+RETURN IIF( cPurp == NIL, "", cPurp )
+
 // StkValSub (real: BMS/RACC03V2.PRG line 1626 - complex class)
 FUNCTION StkValSub()
 RETURN 0
