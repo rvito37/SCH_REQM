@@ -551,6 +551,13 @@ LOCAL lOk := .T.
 LOCAL cFile := cIndex
 LOCAL bOldErr
 
+   // sch_reqm.prg использует "d_stocktmp", а оригинал — "d_stockt".
+   // Подменяем имя на правильное.
+   IF "d_stocktmp" $ cIndex
+      cIndex := StrTran( cIndex, "d_stocktmp", "d_stockt" )
+      cFile := cIndex
+   ENDIF
+
    // Ensure .cdx extension for file check
    IF !( ".cdx" $ Lower( Right( cFile, 4 ) ) ) .AND. !( ".CDX" $ Right( cFile, 4 ) )
       cFile := cFile + ".cdx"
@@ -2180,13 +2187,6 @@ INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
 LogWrite("SchedIndex: tag U_viva_06 created")
 
 LogWrite("SchedIndex: completed, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
-
-// sch_reqm.prg references "d_stocktmp.cdx" (line 581) — copy d_stockt.cdx to d_stocktmp.cdx
-// so both names work (original schedindex created d_stockt, sch_reqm expects d_stocktmp)
-IF FILE(cIdxFile + ".cdx")
-   COPY FILE (cIdxFile + ".cdx") TO (cTempDir + "d_stocktmp.cdx")
-   LogWrite("SchedIndex: copied d_stockt.cdx -> d_stocktmp.cdx")
-ENDIF
 
 dbSelectArea(nOldArea)
 RETURN NIL
