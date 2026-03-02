@@ -1113,16 +1113,10 @@ FUNCTION GetLimits( nQty )
    HB_SYMBOL_UNUSED( nQty )
 RETURN { 0, 999999999 }
 
-// TableTranslate (real: BMS/LIB/TABTRANS.PRG - class)
-CREATE CLASS TableTranslate
-   VAR cAlias
-   METHOD New( cAlias )
+// TableTranslate (real: BMS/LIB/TABTRANS.PRG - inherits TabBase)
+CREATE CLASS TableTranslate FROM TabBase
    METHOD Translate( cValue ) INLINE cValue
 END CLASS
-
-METHOD New( cAlias ) CLASS TableTranslate
-   ::cAlias := cAlias
-RETURN Self
 
 // FilLock already defined above
 
@@ -1134,12 +1128,127 @@ RETURN Date() + 30
 
 // TabBase (real: BMS/LIB/TABBASE.PRG - class)
 CREATE CLASS TabBase
+   VAR lWasOpened
+   VAR cFileName
+   VAR cFileStructure
+   VAR aIndexList
+   VAR aIndexCaptions
+   VAR nLastOrder
+   VAR nPresentOrder
    VAR cAlias
-   METHOD New( cAlias )
+   VAR nIndexPointer
+   METHOD init( cFileName )
+   METHOD New( cFileName )
+   METHOD setIndexList()
+   METHOD SetOrder( nOrder )
+   METHOD ResetOrder()
+   METHOD xopen( cDirectory, lMode, cRdd )
+   METHOD xopenTemp( cDirectory, lMode, cRdd )
+   METHOD close()
 END CLASS
 
-METHOD New( cAlias ) CLASS TabBase
-   ::cAlias := cAlias
+METHOD init( cFileName ) CLASS TabBase
+   ::cFileName      := cFileName
+   ::cAlias         := cFileName
+   ::lWasOpened     := .F.
+   ::aIndexList     := {}
+   ::aIndexCaptions := {}
+   ::nPresentOrder  := 0
+   ::nLastOrder     := 0
+   ::nIndexPointer  := 0
+RETURN Self
+
+METHOD New( cFileName ) CLASS TabBase
+RETURN ::init( cFileName )
+
+METHOD setIndexList() CLASS TabBase
+   // Real implementation reads SysKeys.dbf via GetFileIndexInfo()
+   // For now, build index list from currently open tags
+   LOCAL i, nCount
+   ::aIndexList     := {}
+   ::aIndexCaptions := {}
+   IF ! Empty( Select( ::cFileName ) )
+      nCount := (::cFileName)->( OrdCount() )
+      FOR i := 1 TO nCount
+         AAdd( ::aIndexList, (::cFileName)->( OrdName( i ) ) )
+         AAdd( ::aIndexCaptions, (::cFileName)->( OrdName( i ) ) + ;
+               " KEY: " + (::cFileName)->( OrdKey( i ) ) )
+      NEXT
+   ENDIF
+   ::nPresentOrder := IIF( ! Empty( ::aIndexList ), 1, 0 )
+RETURN Self
+
+METHOD SetOrder( nOrder ) CLASS TabBase
+   ::nLastOrder := ::nPresentOrder
+   ::nPresentOrder := nOrder
+   IF ! Empty( Select( ::cFileName ) )
+      (::cFileName)->( OrdSetFocus( nOrder ) )
+   ENDIF
+RETURN Self
+
+METHOD ResetOrder() CLASS TabBase
+   ::nPresentOrder := ::nLastOrder
+   IF ! Empty( Select( ::cFileName ) )
+      (::cFileName)->( OrdSetFocus( ::nPresentOrder ) )
+   ENDIF
+RETURN Self
+
+METHOD xopen( cDirectory, lMode, cRdd ) CLASS TabBase
+   LOCAL cDbfDir, lOpened
+   DEFAULT lMode TO .T.
+   IF cDirectory == NIL
+      IF GetUserInfo() == NIL
+         cDbfDir := ""
+      ELSEIF "\" $ ::cFileName
+         cDbfDir := SubStr( ::cFileName, 1, RAt( "\", ::cFileName ) )
+         ::cFileName := SubStr( ::cFileName, RAt( "\", ::cFileName ) + 1 )
+      ELSE
+         cDbfDir := GetUserInfo():cDbfDir
+      ENDIF
+   ELSE
+      cDbfDir := cDirectory
+   ENDIF
+   ::lWasOpened := lOpened := ! Empty( Select( ::cFileName ) )
+   IF ! lOpened
+      lOpened := NetUse( ::cFileName, 5, cRdd, lMode, , cDbfDir )
+      ::lWasOpened := .F.
+   ENDIF
+   IF lOpened
+      ::cFileStructure := (::cFileName)->( DbStruct() )
+   ENDIF
+RETURN lOpened
+
+METHOD xopenTemp( cDirectory, lMode, cRdd ) CLASS TabBase
+   // Like xopen but uses temp directory by default
+   LOCAL cDbfDir, lOpened
+   DEFAULT lMode TO .T.
+   IF cDirectory == NIL
+      cDbfDir := GetUserInfo():cTempDir
+   ELSE
+      cDbfDir := cDirectory
+   ENDIF
+   ::lWasOpened := lOpened := ! Empty( Select( ::cFileName ) )
+   IF ! lOpened
+      // Force DBFCDX for local temp files
+      IF Left( cDbfDir, 1 ) $ "CD"
+         cRdd := "DBFCDX"
+      ENDIF
+      lOpened := NetUse( ::cFileName, 5, cRdd, lMode, , cDbfDir )
+      ::lWasOpened := .F.
+   ENDIF
+   IF lOpened
+      ::cFileStructure := (::cFileName)->( DbStruct() )
+      IF ! Empty( ::aIndexList )
+         (::cFileName)->( DbClearIndex() )
+         AEval( ::aIndexList, {| element | (::cFileName)->( OrdSetFocus( element ) ) } )
+      ENDIF
+   ENDIF
+RETURN lOpened
+
+METHOD close() CLASS TabBase
+   IF ! ::lWasOpened .AND. ! Empty( Select( ::cFileName ) )
+      (::cFileName)->( DbCloseArea() )
+   ENDIF
 RETURN Self
 
 // SetRefCounter (real: BMS/DELALLOC.PRG line 749)
