@@ -711,16 +711,24 @@ RETURN .F.
 // --- File Management (real: BMS/AVXUTI.PRG) ---
 
 FUNCTION GenOpenFiles( aFileList, lMode )
+   // Real implementation based on PDC-clean/BMS/AVXUTI.PRG
+   // lMode: .T. = SHARED (default), .F. = EXCLUSIVE
+   // In original, uses TableTranslate():new():xopen() which calls NetUse
    LOCAL i
-   DEFAULT lMode TO .F.
+   LOCAL aoOpenedList := {}
+   DEFAULT lMode TO .T.    // Default SHARED — original uses TabBase:xopen default
    IF aFileList != NIL
       FOR i := 1 TO Len( aFileList )
          IF Select( aFileList[i] ) == 0
-            NetUse( aFileList[i], 5, , lMode )
+            IF NetUse( aFileList[i], 5, , lMode )
+               AAdd( aoOpenedList, aFileList[i] )
+            ELSE
+               AAdd( aoOpenedList, NIL )
+            ENDIF
          ENDIF
       NEXT
    ENDIF
-RETURN NIL
+RETURN aoOpenedList
 
 FUNCTION GenCloseFiles( aFileList )
    LOCAL i
