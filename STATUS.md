@@ -35,15 +35,16 @@
 **Результат**: CreateCondDb скопировал 183 записи из 13173 (только Film). Ожидаем подтверждение что PrepareGenDb теперь подхватывает t_ordPre.
 
 ### SchedIndex — интеграция индексов d_stock
-**Проблема**: `MYRUN("G:\SOURCE\test.exe")` (строка 578) был закомментирован. Без него не создавались индексы `d_stocktmp.cdx` для stock lookup'ов.
+**Проблема**: `MYRUN("G:\SOURCE\test.exe")` (строка 578) был закомментирован. Без него не создавались индексы `d_stockt.cdx` для stock lookup'ов.
 
 **Решение**: `SchedIndex()` интегрирован в `stubs.prg`:
 1. Обновляет `d_stock->seq_no` из таблицы приоритетов `c_hierar` (через `GetHie_2`)
-2. Создаёт 6 условных тегов в `d_stocktmp.cdx`:
+2. Создаёт 6 условных тегов в `d_stockt.cdx` (как в оригинале schedindex.prg):
    - `viva_CZ/IL` — с value, для CZ/IL (wh3+wh4 > 0)
    - `U_viva_CZ/IL` — без value, для CZ/IL (wh3+wh4 > 0)
    - `viva_06/U_viva_06` — для wh6 (LOC $ 'IL_CZ')
-3. `GetHie_2()` — реальная реализация (lookup в c_hierar), заменил stub
+3. Копирует `d_stockt.cdx` → `d_stocktmp.cdx` (sch_reqm.prg ищет `d_stocktmp`)
+4. `GetHie_2()` — реальная реализация (lookup в c_hierar), заменил stub
 
 **Hook**: Препроцессор в `avxdefs.ch` перехватывает `@ 9,11 SAY "Preparing tempery files : Stock files index"` и вызывает `SchedIndex()` после неё.
 
@@ -66,7 +67,7 @@ logger.prg        -> система логирования
 
 ## Что осталось
 - [ ] Подтвердить работу фильтрации критериев (alias fix)
-- [ ] Подтвердить работу SchedIndex (d_stocktmp.cdx создаётся)
+- [ ] Подтвердить работу SchedIndex (d_stockt.cdx создаётся)
 - [ ] Сравнить выходные данные Harbour и Clipper
 - [ ] Проверить что READ не выходит преждевременно
 - [ ] R&R report output (закомментирован в оригинале)
