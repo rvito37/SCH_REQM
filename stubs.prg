@@ -1110,14 +1110,13 @@ METHOD Exec( lSeeMessage ) CLASS TheReport
       GenOpenFiles(::aDBs)
    ENDIF
 
-   // Apply criteria filter on d_ord BEFORE DoSched.
-   // In the original flow, CreateCondDb filters d_ord through ShaiCond+cbExtraCond
-   // before copying to t_ord. Since we skip CreateCondDb and PrepareGenDb copies
-   // ALL records from d_ord without filtering, we must pre-filter d_ord here.
-   // SET FILTER works because PrepareGenDb's NetUse for t_ordPre fails (file doesn't
-   // exist on first run), so d_ord alias stays pointing to G:\TEST\d_ord with our filter.
-   IF ::aDBs != NIL .AND. Len(::aDBs) > 0 .AND. Select("d_ord") > 0
-      ApplyCriteriaFilter( "d_ord", aBuffer, ::aTstBlocks, ::cbExtraCond )
+   // CreateCondDb - create filtered t_ordPre (from THEREPO.PRG line 726)
+   // In original flow, CreateCondDb does:
+   //   COPY TO t_ordPre FOR ShaiCond() .AND. cbExtraCond
+   // Then PrepareGenDb in DoSched opens t_ordPre with alias "d_ord"
+   // and copies those pre-filtered records into t_ord.
+   IF ::cPrepDbf != NIL .AND. ::aDBs != NIL .AND. Len(::aDBs) > 0
+      CreateCondDb( Self, ::aDBs[1], aTestBlocks, aBuffer )
    ENDIF
 
    // Call the prep callback (DoSched for scheduling)
@@ -2059,49 +2058,62 @@ LogWrite("GetBuffer_BuildAll: " + cFile + " -> built all-codes buffer (" + LTrim
 RETURN cResult
 
 // ============================================
-// ApplyCriteriaFilter - Set filter on d_ord to implement criteria filtering
-// In original Clipper flow, CreateCondDb (THEREPO.PRG) filters d_ord through
-// ShaiCond before PrepareGenDb copies records. Since we skip CreateCondDb,
-// we apply the filter here using dbSetFilter with a codeblock.
+// CreateCondDb - Create filtered t_ordPre file (from THEREPO.PRG line 726)
+//
+// Exact replica of original flow:
+//   1. Select the leading DBF (d_ord)
+//   2. COPY TO t_ordPre FOR ShaiCond() .AND. cbExtraCond
+//   3. PrepareGenDb in DoSched later opens t_ordPre as alias "d_ord"
+//      and copies from the already-filtered records into t_ord
 // ============================================
-FUNCTION ApplyCriteriaFilter( cAlias, aBuf, aQueryBlks, cbExtra )
+FUNCTION CreateCondDb( oRep, cDbf, aTstBlks, aBuf )
 LOCAL nOldArea := Select()
-LOCAL cBuf1, cBuf2, cBuf3, cBuf4
+LOCAL cTmpFile := GetUserInfo():cTempDir + oRep:cPrepDbf
+LOCAL nCopied
 
-IF aBuf == NIL .OR. Empty(aBuf)
-   LogWrite("ApplyCriteriaFilter: no buffers, skipping filter")
-   RETURN NIL
+LogWrite("CreateCondDb: cDbf=" + cDbf + " cPrepDbf=" + oRep:cPrepDbf + ;
+         " tmpFile=" + cTmpFile)
+
+// Select the leading file (d_ord)
+SELECT (Select(cDbf))
+
+// Delete old t_ordPre if exists
+IF FILE(cTmpFile + ".dbf")
+   IF Select(oRep:cPrepDbf) != 0
+      (oRep:cPrepDbf)->(dbCloseArea())
+   ENDIF
+   FERASE(cTmpFile + ".dbf")
+   FERASE(cTmpFile + ".cdx")
 ENDIF
 
-// Capture buffer values into LOCAL vars for the filter codeblock
-// (codeblocks capture by reference, so we need stable vars)
-cBuf1 := IIF(Len(aBuf) >= 1, aBuf[1], "")
-cBuf2 := IIF(Len(aBuf) >= 2, aBuf[2], "")
-cBuf3 := IIF(Len(aBuf) >= 3, aBuf[3], "")
-cBuf4 := IIF(Len(aBuf) >= 4, aBuf[4], "")
-
-dbSelectArea(cAlias)
-
-// Build filter: check product type/line/size/value criteria
-// Same logic as QueryBlocks in sch_reqm.prg lines 402-410
-// Purpose/Status (5,6) use {||.T.} in QueryBlocks so we skip them
-// Also apply cbExtraCond (excludes cancelled/completed orders)
-dbSetFilter( {|| ;
-   (Empty(cBuf1) .OR. FieldGet(FieldPos("ptype_id")) $ cBuf1) .AND. ;
-   (Empty(cBuf2) .OR. FieldGet(FieldPos("pline_id")) $ cBuf2) .AND. ;
-   (Empty(cBuf3) .OR. FieldGet(FieldPos("size_id"))  $ cBuf3) .AND. ;
-   (Empty(cBuf4) .OR. Str(FieldGet(FieldPos("value_id")),9,3) $ cBuf4) .AND. ;
-   !(FieldGet(FieldPos("poln_stat")) $ "C_D") .AND. ;
-   (FieldGet(FieldPos("qty_ord")) - FieldGet(FieldPos("qty_canc")) - FieldGet(FieldPos("qty_shipd")) - FieldGet(FieldPos("qty_alloc")) > 0) ;
-} )
-
+// Go to top of d_ord
 dbGoTop()
 
-LogWrite("ApplyCriteriaFilter: filter set on " + cAlias + ;
-         " Buf1=" + Left(cBuf1,20) + ;
-         " Buf2=" + IIF(Empty(cBuf2),"(all)",Left(cBuf2,20)) + ;
-         " RecCount=" + LTrim(Str(RecCount())) + ;
-         " after filter top RecNo=" + LTrim(Str(RecNo())) + " EOF=" + IIF(EOF(),"T","F"))
+@ 2,0 SAY PadR("Creating Query file...", 80) COLOR "W+/R"
+
+// COPY TO t_ordPre FOR ShaiCond() .AND. cbExtraCond
+// This is the exact same logic as THEREPO.PRG lines 958-965 (no-smartindex path):
+//   COPY TO (::cTempFileDir+::cPrepDbf)
+//     FOR ShaiCond(::aTstBlocks,::oScrl,recno(),::cTypeOfReport == "REPORT")
+//     .AND. IF(VALTYPE(::cbExtraCond)=="B", Eval(::cbExtraCond), .T.)
+COPY TO (cTmpFile) ;
+   FOR ShaiCond(aTstBlks, NIL, RecNo(), .T.) ;
+   .AND. IIF(ValType(oRep:cbExtraCond) == "B", Eval(oRep:cbExtraCond), .T.)
+
+@ 2,0 SAY PadR(" ", 80) COLOR "W+/B"
+
+// Log how many records were copied
+nCopied := 0
+IF FILE(cTmpFile + ".dbf")
+   NetUse(oRep:cPrepDbf, 5, NIL, .F., .T., GetUserInfo():cTempDir)
+   IF Select(oRep:cPrepDbf) > 0
+      nCopied := (oRep:cPrepDbf)->(RecCount())
+      (oRep:cPrepDbf)->(dbCloseArea())
+   ENDIF
+ENDIF
+
+LogWrite("CreateCondDb: copied " + LTrim(Str(nCopied)) + " records to " + cTmpFile + ;
+         " (from " + LTrim(Str(RecCount())) + " in " + cDbf + ")")
 
 dbSelectArea(nOldArea)
 RETURN NIL
