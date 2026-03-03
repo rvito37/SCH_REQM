@@ -551,11 +551,12 @@ LOCAL lOk := .T.
 LOCAL cFile := cIndex
 LOCAL bOldErr
 
-   // sch_reqm.prg использует "d_stocktmp", а оригинал — "d_stockt".
-   // Подменяем имя на правильное.
+   // sch_reqm.prg ищет cTempDir+"d_stocktmp", а оригинал строит
+   // G:\USERS\TAPI_SCH\d_stockt. Подменяем полный путь.
    IF "d_stocktmp" $ cIndex
-      cIndex := StrTran( cIndex, "d_stocktmp", "d_stockt" )
+      cIndex := "G:\USERS\TAPI_SCH\d_stockt"
       cFile := cIndex
+      LogWrite("SafeDbSetIndex: подмена d_stocktmp -> " + cIndex)
    ENDIF
 
    // Ensure .cdx extension for file check
@@ -2128,18 +2129,14 @@ RETURN NIL
 // Обновляет seq_no из c_hierar, потом создаёт 6 условных тегов
 // в d_stockt.cdx для поиска по локации (CZ/IL/06).
 //
-// Проблема ADS 5020: d_stock открыт через ADS (сетевой), а индекс
-// нужно создать локально. Решение: закрыть ADS-версию d_stock,
-// переоткрыть через DBFCDX (локальный драйвер), построить индексы,
-// закрыть, вернуть ADS-версию.
+// Индексный файл создаётся в G:\USERS\TAPI_SCH\ — как в оригинале.
+// Это сетевой путь видимый ADS серверу, поэтому ADS Error 5020 не будет.
 // ============================================
 FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
-LOCAL cTempDir := GetUserInfo():cTempDir
-LOCAL cDbfDir  := GetUserInfo():cDbfDir
-LOCAL cIdxFile := cTempDir + "d_stockt"
+LOCAL cIdxFile := "G:\USERS\TAPI_SCH\d_stockt"
 
-LogWrite("SchedIndex: starting, cTempDir=" + cTempDir + " cDbfDir=" + cDbfDir)
+LogWrite("SchedIndex: starting, idxFile=" + cIdxFile)
 
 // Удалить старый индексный файл
 IF FILE(cIdxFile + ".cdx")
@@ -2147,18 +2144,8 @@ IF FILE(cIdxFile + ".cdx")
    LogWrite("SchedIndex: удалён старый " + cIdxFile + ".cdx")
 ENDIF
 
-// === Фаза 1: Закрыть ADS-версию d_stock, открыть через DBFCDX ===
-IF Select("d_stock") > 0
-   LogWrite("SchedIndex: закрываю ADS d_stock")
-   dbSelectArea("d_stock")
-   d_stock->(dbCloseArea())
-ENDIF
-
-// Открыть d_stock через локальный DBFCDX (обход ADS Error 5020)
-LogWrite("SchedIndex: открываю d_stock через DBFCDX")
-DBUSEAREA( .T., "DBFCDX", cDbfDir + "d_stock", "d_stock", .T., .F. )
-
-// === Фаза 2: Обновить seq_no из c_hierar ===
+// === Фаза 1: Обновить seq_no из c_hierar ===
+DbSelectArea("d_stock")
 d_stock->(dbSetFilter({|| d_stock->wh1 + d_stock->wh2 + d_stock->wh3 + d_stock->wh4 + d_stock->wh6 > 0}))
 d_stock->(dbGoTop())
 
@@ -2175,7 +2162,7 @@ ENDDO
 d_stock->(dbClearFilter())
 d_stock->(dbGoTop())
 
-// === Фаза 3: Создать 6 условных тегов (как в schedindex.prg) ===
+// === Фаза 2: Создать 6 условных тегов (как в schedindex.prg) ===
 LogWrite("SchedIndex: создаю теги в " + cIdxFile)
 
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
@@ -2203,11 +2190,6 @@ INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
 LogWrite("SchedIndex: тег U_viva_06 создан")
 
 LogWrite("SchedIndex: завершён, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
-
-// === Фаза 4: Закрыть DBFCDX, вернуть ADS-версию d_stock ===
-d_stock->(dbCloseArea())
-LogWrite("SchedIndex: закрыл DBFCDX d_stock, открываю через ADS")
-NetUse("d_stock", 5)
 
 dbSelectArea(nOldArea)
 RETURN NIL
