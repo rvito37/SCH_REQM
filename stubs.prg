@@ -2123,30 +2123,46 @@ dbSelectArea(nOldArea)
 RETURN NIL
 
 // ============================================
-// SchedIndex - Build d_stock temp indexes (from schedindex.prg)
-// Called before ordsetfocus(1) on d_stock in DoSched (sch_reqm line 580)
-// Updates seq_no from c_hierar priority, then creates 6 conditional tags
-// into d_stocktmp.cdx for scheduling lookups by location (CZ/IL/06).
+// SchedIndex - Построение временных индексов d_stock (из schedindex.prg)
+// Вызывается перед ordsetfocus(1) в DoSched (sch_reqm строка 580)
+// Обновляет seq_no из c_hierar, потом создаёт 6 условных тегов
+// в d_stockt.cdx для поиска по локации (CZ/IL/06).
+//
+// Проблема ADS 5020: d_stock открыт через ADS (сетевой), а индекс
+// нужно создать локально. Решение: закрыть ADS-версию d_stock,
+// переоткрыть через DBFCDX (локальный драйвер), построить индексы,
+// закрыть, вернуть ADS-версию.
 // ============================================
 FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
 LOCAL cTempDir := GetUserInfo():cTempDir
+LOCAL cDbfDir  := GetUserInfo():cDbfDir
 LOCAL cIdxFile := cTempDir + "d_stockt"
 
-LogWrite("SchedIndex: starting, cTempDir=" + cTempDir)
+LogWrite("SchedIndex: starting, cTempDir=" + cTempDir + " cDbfDir=" + cDbfDir)
 
-// Delete old index file if exists
+// Удалить старый индексный файл
 IF FILE(cIdxFile + ".cdx")
    FERASE(cIdxFile + ".cdx")
-   LogWrite("SchedIndex: deleted old " + cIdxFile + ".cdx")
+   LogWrite("SchedIndex: удалён старый " + cIdxFile + ".cdx")
 ENDIF
 
-// === Phase 1: Update seq_no from c_hierar priority ===
-DbSelectArea("d_stock")
+// === Фаза 1: Закрыть ADS-версию d_stock, открыть через DBFCDX ===
+IF Select("d_stock") > 0
+   LogWrite("SchedIndex: закрываю ADS d_stock")
+   dbSelectArea("d_stock")
+   d_stock->(dbCloseArea())
+ENDIF
+
+// Открыть d_stock через локальный DBFCDX (обход ADS Error 5020)
+LogWrite("SchedIndex: открываю d_stock через DBFCDX")
+DBUSEAREA( .T., "DBFCDX", cDbfDir + "d_stock", "d_stock", .T., .F. )
+
+// === Фаза 2: Обновить seq_no из c_hierar ===
 d_stock->(dbSetFilter({|| d_stock->wh1 + d_stock->wh2 + d_stock->wh3 + d_stock->wh4 + d_stock->wh6 > 0}))
 d_stock->(dbGoTop())
 
-LogWrite("SchedIndex: updating seq_no from c_hierar...")
+LogWrite("SchedIndex: обновляю seq_no из c_hierar...")
 DO WHILE !d_stock->(Eof())
    IF d_stock->(RLock())
       d_stock->seq_no := GetHie_2(d_stock->tol_id, d_stock->volt_id, d_stock->tc_id)
@@ -2155,38 +2171,43 @@ DO WHILE !d_stock->(Eof())
    d_stock->(dbSkip())
 ENDDO
 
-// Clear the filter after seq_no update
+// Снять фильтр после обновления seq_no
 d_stock->(dbClearFilter())
 d_stock->(dbGoTop())
 
-// === Phase 2: Create 6 conditional index tags ===
-LogWrite("SchedIndex: creating index tags in " + cIdxFile)
+// === Фаза 3: Создать 6 условных тегов (как в schedindex.prg) ===
+LogWrite("SchedIndex: создаю теги в " + cIdxFile)
 
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG viva_CZ TO (cIdxFile) FOR LOC == 'CZ' .AND. wh3+wh4 > 0
-LogWrite("SchedIndex: tag viva_CZ created")
+LogWrite("SchedIndex: тег viva_CZ создан")
 
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG viva_IL TO (cIdxFile) FOR LOC == 'IL' .AND. wh3+wh4 > 0
-LogWrite("SchedIndex: tag viva_IL created")
+LogWrite("SchedIndex: тег viva_IL создан")
 
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_CZ TO (cIdxFile) FOR LOC == 'CZ' .AND. wh3+wh4 > 0
-LogWrite("SchedIndex: tag U_viva_CZ created")
+LogWrite("SchedIndex: тег U_viva_CZ создан")
 
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_IL TO (cIdxFile) FOR LOC == 'IL' .AND. wh3+wh4 > 0
-LogWrite("SchedIndex: tag U_viva_IL created")
+LogWrite("SchedIndex: тег U_viva_IL создан")
 
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
-LogWrite("SchedIndex: tag viva_06 created")
+LogWrite("SchedIndex: тег viva_06 создан")
 
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
-LogWrite("SchedIndex: tag U_viva_06 created")
+LogWrite("SchedIndex: тег U_viva_06 создан")
 
-LogWrite("SchedIndex: completed, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
+LogWrite("SchedIndex: завершён, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
+
+// === Фаза 4: Закрыть DBFCDX, вернуть ADS-версию d_stock ===
+d_stock->(dbCloseArea())
+LogWrite("SchedIndex: закрыл DBFCDX d_stock, открываю через ADS")
+NetUse("d_stock", 5)
 
 dbSelectArea(nOldArea)
 RETURN NIL
