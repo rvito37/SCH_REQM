@@ -208,10 +208,9 @@ FUNCTION DBFCDXAX()
 RETURN "ADSCDX"
 
 // GetMyDriver (real: BMS/BMSBAR.PRG line 2372)
-// In standalone mode cMyDriver is always NIL, so returns "ADS"
-// ADS RDD handles both local and remote ADS connections
+// ADSCDX = CDX-compatible locking, matches original Clipper DBFCDXAX
 FUNCTION GetMyDriver()
-RETURN "ADS"
+RETURN "ADSCDX"
 
 // ============================================
 // Novell NetWare (fn_*) stubs

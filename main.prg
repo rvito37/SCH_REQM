@@ -9,6 +9,7 @@
 
 REQUEST DBFCDX
 REQUEST ADS
+REQUEST ADSCDX
 REQUEST HB_CODEPAGE_HE862
 
 PROCEDURE Main()
@@ -18,9 +19,9 @@ PROCEDURE Main()
    // Set up error handler with logging
    bOldError := ErrorBlock( {|e| SchReqmErrorHandler( e ) } )
 
-   // Initialize ADS RDD
+   // Initialize ADS RDD (ADSCDX = CDX-compatible mode, matches original Clipper DBFCDXAX)
    rddRegister( "ADS", 1 )
-   rddSetDefault( "ADS" )
+   rddSetDefault( "ADSCDX" )
    SET SERVER REMOTE
    SET FILETYPE TO CDX
    SET EXCLUSIVE OFF
