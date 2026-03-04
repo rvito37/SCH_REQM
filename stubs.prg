@@ -629,15 +629,25 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
             lOpenErr := .F.
             bOldErr := ErrorBlock( {|e| Break(e) } )
             BEGIN SEQUENCE
-               IF lLocalFile
-                  // Local: explicit DBFCDX driver + full path
+               IF lLocalFile .AND. cAlias != NIL
+                  IF lOpenMode
+                     USE (cDbfDir + cDataBase) ALIAS (cAlias) VIA "DBFCDX" SHARED NEW
+                  ELSE
+                     USE (cDbfDir + cDataBase) ALIAS (cAlias) VIA "DBFCDX" EXCLUSIVE NEW
+                  ENDIF
+               ELSEIF lLocalFile
                   IF lOpenMode
                      USE (cDbfDir + cDataBase) VIA "DBFCDX" SHARED NEW
                   ELSE
                      USE (cDbfDir + cDataBase) VIA "DBFCDX" EXCLUSIVE NEW
                   ENDIF
+               ELSEIF cAlias != NIL
+                  IF lOpenMode
+                     USE (cDataBase) ALIAS (cAlias) SHARED NEW
+                  ELSE
+                     USE (cDataBase) ALIAS (cAlias) EXCLUSIVE NEW
+                  ENDIF
                ELSE
-                  // Network: USE file SHARED NEW — exactly like working production code
                   IF lOpenMode
                      USE (cDataBase) SHARED NEW
                   ELSE
