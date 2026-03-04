@@ -44,6 +44,15 @@ PROCEDURE Main()
    LogWrite( "User: " + fn_WhoAmI() )
    LogWrite( "Default path: " + SET( _SET_DEFAULT ) )
 
+   // TEST: open d_prom SHARED and wait for user to check parallel access
+   LogWrite( "TEST: opening d_prom SHARED NEW..." )
+   USE d_prom SHARED NEW
+   LogWrite( "TEST: d_prom opened, alias=" + Alias() + " reccount=" + LTrim(Str(RecCount())) )
+   LogWrite( "TEST: waiting... press any key to continue" )
+   ALERT( "d_prom opened SHARED. Check parallel access now. Press OK to continue." )
+   d_prom->( dbCloseArea() )
+   LogWrite( "TEST: d_prom closed" )
+
    // Run the scheduler
    Sched_R3()
 
