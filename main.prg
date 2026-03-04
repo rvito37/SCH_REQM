@@ -17,6 +17,7 @@ SET FILETYPE TO CDX
 SET EPOCH TO 1990
 SET DATE BRITISH
 SET DELETED ON
+SET DEFAULT TO G:\AVXBMS
 
 USE d_prom SHARED NEW
 ALERT( "d_prom opened SHARED. RecCount=" + LTrim(Str(RecCount())) + ". Check parallel access now." )
