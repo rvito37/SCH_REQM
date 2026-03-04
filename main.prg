@@ -12,7 +12,7 @@ SETMODE( 25, 80 )
 rddRegister( "ADS", 1 )
 rddsetdefault( "ADS" )
 
-AdsSetServerType( ADS_REMOTE_SERVER + ADS_AIS_SERVER )
+AdsSetServerType( ADS_AIS_SERVER )
 SET FILETYPE TO CDX
 SET EPOCH TO 1990
 SET DATE BRITISH
