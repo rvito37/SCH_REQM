@@ -590,7 +590,7 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
    LOCAL cDbfDir
    LOCAL nAlert
    LOCAL cLockingUser, aLockingUser := {"", NIL}, nLock
-   LOCAL bOldErr, lOpenErr
+   LOCAL bOldErr, lOpenErr, oErr
 
    // Get base directory: from cDir parameter, or from GetUserInfo():cDbfDir
    IF cDir == NIL
@@ -632,13 +632,18 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
                ELSE
                   DBUSEAREA( lNewWorkArea, cDriver, (cDataBase), cAlias, lOpenMode, .F. )
                ENDIF
-            RECOVER
+            RECOVER USING oErr
                lOpenErr := .T.
             END SEQUENCE
             ErrorBlock( bOldErr )
 
             IF lOpenErr
-               LogWrite( "NetUse: DBUSEAREA error for " + cDataBase + " - file may not exist" )
+               LogWrite( "NetUse: DBUSEAREA error for " + cDataBase + ;
+                  " desc=" + iif( oErr != NIL, oErr:description, "?" ) + ;
+                  " oper=" + iif( oErr != NIL .AND. ! Empty(oErr:operation), oErr:operation, "" ) + ;
+                  " file=" + iif( oErr != NIL .AND. oErr:filename != NIL, oErr:filename, "" ) + ;
+                  " os=" + iif( oErr != NIL, LTrim(Str(oErr:osCode)), "?" ) + ;
+                  " sub=" + iif( oErr != NIL, LTrim(Str(oErr:subCode)), "?" ) )
                RETURN .F.
             ENDIF
          ELSE
@@ -2155,8 +2160,10 @@ DO WHILE !d_stock->(Eof())
       d_stock->seq_no := GetHie_2(d_stock->tol_id, d_stock->volt_id, d_stock->tc_id)
       d_stock->(dbUnlock())
    ENDIF
+   @ 10, 1 SAY d_stock->(RecNo())
    d_stock->(dbSkip())
 ENDDO
+CLS
 
 // Снять фильтр после обновления seq_no
 d_stock->(dbClearFilter())
@@ -2166,27 +2173,33 @@ d_stock->(dbGoTop())
 LogWrite("SchedIndex: создаю теги в " + cIdxFile)
 
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_CZ TO (cIdxFile) FOR LOC == 'CZ' .AND. wh3+wh4 > 0
+   TAG viva_CZ TO (cIdxFile) FOR &(LOC == 'CZ' .AND. wh3+wh4 > 0)
+@ 10, 1 SAY "viva_CZ"
 LogWrite("SchedIndex: тег viva_CZ создан")
 
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_IL TO (cIdxFile) FOR LOC == 'IL' .AND. wh3+wh4 > 0
+   TAG viva_IL TO (cIdxFile) FOR &(LOC == 'IL' .AND. wh3+wh4 > 0)
+@ 10, 1 SAY "viva_IL"
 LogWrite("SchedIndex: тег viva_IL создан")
 
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_CZ TO (cIdxFile) FOR LOC == 'CZ' .AND. wh3+wh4 > 0
+   TAG U_viva_CZ TO (cIdxFile) FOR &(LOC == 'CZ' .AND. wh3+wh4 > 0)
+@ 10, 1 SAY "U_viva_CZ"
 LogWrite("SchedIndex: тег U_viva_CZ создан")
 
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_IL TO (cIdxFile) FOR LOC == 'IL' .AND. wh3+wh4 > 0
+   TAG U_viva_IL TO (cIdxFile) FOR &(LOC == 'IL' .AND. wh3+wh4 > 0)
+@ 10, 1 SAY "U_viva_IL"
 LogWrite("SchedIndex: тег U_viva_IL создан")
 
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
+   TAG viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
+@ 10, 1 SAY "viva_06"
 LogWrite("SchedIndex: тег viva_06 создан")
 
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
+   TAG U_viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
+@ 10, 1 SAY "U_viva_06"
 LogWrite("SchedIndex: тег U_viva_06 создан")
 
 LogWrite("SchedIndex: завершён, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
