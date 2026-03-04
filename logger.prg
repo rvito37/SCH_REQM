@@ -9,6 +9,17 @@
 STATIC s_cLogFile := "sch_reqm.log"
 
 // ============================================
+// LogInit - Recreate log file (call at app start)
+// ============================================
+FUNCTION LogInit()
+   LOCAL hFile
+   hFile := FCreate( s_cLogFile )
+   IF hFile != -1
+      FClose( hFile )
+   ENDIF
+RETURN NIL
+
+// ============================================
 // LogWrite - Write a message to the log file
 // ============================================
 FUNCTION LogWrite( cMsg )

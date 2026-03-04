@@ -23,6 +23,8 @@ PROCEDURE Main()
    rddSetDefault( "ADS" )
    SET SERVER REMOTE
    SET FILETYPE TO CDX
+   SET EXCLUSIVE OFF
+   SET DELETE ON
    SET DEFAULT TO G:\TEST
 
    // Hebrew codepage
@@ -32,7 +34,8 @@ PROCEDURE Main()
    // GTWVG window title
    hb_gtInfo( HB_GTI_WINTITLE, "SCH_REQM - Auto Scheduling" )
 
-   // Start logging
+   // Start logging (fresh log each run)
+   LogInit()
    LogWrite( "=== SCH_REQM started " + DToC( Date() ) + " " + Time() + " ===" )
    LogWrite( "User: " + fn_WhoAmI() )
    LogWrite( "Default path: " + SET( _SET_DEFAULT ) )
