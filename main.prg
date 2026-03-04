@@ -1,6 +1,6 @@
 #include "ads.ch"
 #include "DbInfo.ch"
-#include "hbgtinfo.ch"
+//#include "hbgtinfo.ch"
 
 REQUEST HB_LANG_HE862
 REQUEST DBFCDX
@@ -17,7 +17,6 @@ SET FILETYPE TO CDX
 SET EPOCH TO 1990
 SET DATE BRITISH
 SET DELETED ON
-SET DEFAULT TO G:\TEST
 
 USE d_prom SHARED NEW
 ALERT( "d_prom opened SHARED. RecCount=" + LTrim(Str(RecCount())) + ". Check parallel access now." )
