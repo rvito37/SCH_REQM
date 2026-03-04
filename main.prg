@@ -1,28 +1,53 @@
-#include "ads.ch"
-#include "DbInfo.ch"
-//#include "hbgtinfo.ch"
+/*
+ * main.prg - Entry point for SCH_REQM Harbour module
+ * Initializes ADS, GTWVG, logging, error handler
+ * Then calls Sched_R3() from sch_reqm.prg
+ */
 
-REQUEST HB_LANG_HE862
+#include "ads.ch"
+#include "hbgtinfo.ch"
+
 REQUEST DBFCDX
 REQUEST ADS
+REQUEST ADSCDX
+REQUEST HB_CODEPAGE_HE862
 
-PROCEDURE Main
+PROCEDURE Main()
 
-SETMODE( 25, 80 )
-rddRegister( "ADS", 1 )
-rddsetdefault( "ADS" )
+   LOCAL bOldError
 
-SET SERVER REMOTE
-SET FILETYPE TO CDX
-SET EPOCH TO 1990
-SET DATE BRITISH
-SET DELETED ON
-SET DEFAULT TO G:\AVXBMS
+   // Set up error handler with logging
+   bOldError := ErrorBlock( {|e| SchReqmErrorHandler( e ) } )
 
-USE d_prom SHARED NEW
-ALERT( "d_prom opened SHARED. RecCount=" + LTrim(Str(RecCount())) + ". Check parallel access now." )
-d_prom->( dbCloseArea() )
+   // Initialize ADS RDD — matches production BMSBAR.PRG
+   rddRegister( "ADS", 1 )
+   rddSetDefault( "ADS" )
+   SET SERVER REMOTE
+   SET FILETYPE TO CDX
+   SET EXCLUSIVE OFF
+   SET DELETE ON
+   SET DEFAULT TO G:\AVXBMS
 
-CLOSE ALL
+   // Hebrew codepage
+   HB_CDPSELECT( "HE862" )
+   hb_setTermCP( "CP862" )
+
+   // GTWVG window title
+   hb_gtInfo( HB_GTI_WINTITLE, "SCH_REQM - Auto Scheduling" )
+
+   // Start logging (fresh log each run)
+   LogInit()
+   LogWrite( "=== SCH_REQM started " + DToC( Date() ) + " " + Time() + " ===" )
+   LogWrite( "User: " + fn_WhoAmI() )
+   LogWrite( "Default path: " + SET( _SET_DEFAULT ) )
+
+   // Run the scheduler
+   Sched_R3()
+
+   // Cleanup
+   LogWrite( "=== SCH_REQM finished " + DToC( Date() ) + " " + Time() + " ===" )
+   CLOSE ALL
+
+   ErrorBlock( bOldError )
 
 RETURN

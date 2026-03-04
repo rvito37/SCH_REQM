@@ -590,7 +590,6 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
    LOCAL nAlert
    LOCAL cLockingUser, aLockingUser := {"", NIL}, nLock
    LOCAL bOldErr, lOpenErr, oErr
-   LOCAL lLocalFile
 
    // Get base directory: from cDir parameter, or from GetUserInfo():cDbfDir
    IF cDir == NIL
@@ -599,23 +598,21 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
       cDbfDir := cDir
    ENDIF
 
-   // For local files (C:) use DBFCDX with full path
-   // For network files use default RDD (ADS) with just filename — like "USE file SHARED NEW"
-   lLocalFile := ( Left(cDbfDir, 2) $ "C:" )
+   // Select RDD driver: DBFCDX for local (C:), ADS for network
+   cDriver := IIF( Left(cDbfDir, 2) $ "C:", "DBFCDX", GetMyDriver() )
 
    DEFAULT lNewWorkArea TO .T.
    DEFAULT lOpenMode    TO .T.      // .T. = SHARED
    DEFAULT nSeconds     TO 5
 
+   IF cDriver == NIL
+      cDriver := GetMyDriver()
+   ENDIF
+
    lForever := ( nSeconds == 0 )
 
-   IF lLocalFile
-      LogWrite( "NetUse: " + cDataBase + " driver=DBFCDX dir=" + cDbfDir + ;
-                " shared=" + IIF( lOpenMode, "T", "F" ) )
-   ELSE
-      LogWrite( "NetUse: " + cDataBase + " driver=DEFAULT(ADS) shared=" + ;
-                IIF( lOpenMode, "T", "F" ) + " (using SET DEFAULT path)" )
-   ENDIF
+   LogWrite( "NetUse: " + cDataBase + " driver=" + cDriver + " dir=" + cDbfDir + ;
+             " shared=" + IIF( lOpenMode, "T", "F" ) + " newWA=" + IIF( lNewWorkArea, "T", "F" ) )
 
    WHILE lRestart
       nWaitTime := nSeconds
@@ -625,34 +622,14 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
          IF ( Select(cDataBase) == 0 ) .OR. ;
             ( Select(cDataBase) != 0 .AND. cAlias != NIL .AND. Select(cAlias) == 0 )
 
-            // Wrap in error trap
+            // Wrap DBUSEAREA in error trap to handle errors gracefully
             lOpenErr := .F.
             bOldErr := ErrorBlock( {|e| Break(e) } )
             BEGIN SEQUENCE
-               IF lLocalFile .AND. cAlias != NIL
-                  IF lOpenMode
-                     USE (cDbfDir + cDataBase) ALIAS (cAlias) VIA "DBFCDX" SHARED NEW
-                  ELSE
-                     USE (cDbfDir + cDataBase) ALIAS (cAlias) VIA "DBFCDX" EXCLUSIVE NEW
-                  ENDIF
-               ELSEIF lLocalFile
-                  IF lOpenMode
-                     USE (cDbfDir + cDataBase) VIA "DBFCDX" SHARED NEW
-                  ELSE
-                     USE (cDbfDir + cDataBase) VIA "DBFCDX" EXCLUSIVE NEW
-                  ENDIF
-               ELSEIF cAlias != NIL
-                  IF lOpenMode
-                     USE (cDataBase) ALIAS (cAlias) SHARED NEW
-                  ELSE
-                     USE (cDataBase) ALIAS (cAlias) EXCLUSIVE NEW
-                  ENDIF
+               IF Empty(lDirectory)
+                  DBUSEAREA( lNewWorkArea, cDriver, (cDbfDir + cDataBase), cAlias, lOpenMode, .F. )
                ELSE
-                  IF lOpenMode
-                     USE (cDataBase) SHARED NEW
-                  ELSE
-                     USE (cDataBase) EXCLUSIVE NEW
-                  ENDIF
+                  DBUSEAREA( lNewWorkArea, cDriver, (cDataBase), cAlias, lOpenMode, .F. )
                ENDIF
             RECOVER USING oErr
                lOpenErr := .T.
@@ -660,7 +637,7 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
             ErrorBlock( bOldErr )
 
             IF lOpenErr
-               LogWrite( "NetUse: USE error for " + cDataBase + ;
+               LogWrite( "NetUse: DBUSEAREA error for " + cDataBase + ;
                   " desc=" + iif( oErr != NIL, oErr:description, "?" ) + ;
                   " oper=" + iif( oErr != NIL .AND. ! Empty(oErr:operation), oErr:operation, "" ) + ;
                   " file=" + iif( oErr != NIL .AND. oErr:filename != NIL, oErr:filename, "" ) + ;
