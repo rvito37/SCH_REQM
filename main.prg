@@ -17,7 +17,6 @@ SET FILETYPE TO CDX
 SET EPOCH TO 1990
 SET DATE BRITISH
 SET DELETED ON
-SET AXS LOCKING OFF
 
 USE d_prom SHARED NEW
 ALERT( "d_prom opened SHARED. RecCount=" + LTrim(Str(RecCount())) + ". Check parallel access now." )
