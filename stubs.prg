@@ -205,12 +205,12 @@ RETURN AdsSetExact( .T. )
 // ============================================
 
 FUNCTION DBFCDXAX()
-RETURN "ADSCDX"
+RETURN "ADS"
 
 // GetMyDriver (real: BMS/BMSBAR.PRG line 2372)
-// ADSCDX = CDX-compatible locking, matches original Clipper DBFCDXAX
+// Must return "ADS" — production uses rddsetdefault("ADS") + SET FILETYPE TO CDX
 FUNCTION GetMyDriver()
-RETURN "ADSCDX"
+RETURN "ADS"
 
 // ============================================
 // Novell NetWare (fn_*) stubs

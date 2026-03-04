@@ -19,11 +19,13 @@ PROCEDURE Main()
    // Set up error handler with logging
    bOldError := ErrorBlock( {|e| SchReqmErrorHandler( e ) } )
 
-   // Initialize ADS RDD (ADSCDX = CDX-compatible mode, matches original Clipper DBFCDXAX)
+   // Initialize ADS RDD — must match production BMSBAR.PRG exactly
    rddRegister( "ADS", 1 )
-   rddSetDefault( "ADSCDX" )
+   rddSetDefault( "ADS" )
    SET SERVER REMOTE
    SET FILETYPE TO CDX
+   SET EPOCH TO 1990
+   SET DATE BRITISH
    SET EXCLUSIVE OFF
    SET DELETE ON
    SET RIGHTS CHECKING OFF
