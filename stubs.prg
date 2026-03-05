@@ -651,6 +651,13 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
                   " sub=" + iif( oErr != NIL, LTrim(Str(oErr:subCode)), "?" ) )
                RETURN .F.
             ENDIF
+
+            // Diagnostic: verify alias was actually created
+            LogWrite( "NetUse: DBUSEAREA ok, Select(" + cDataBase + ")=" + LTrim(Str(Select(cDataBase))) + ;
+               IIF( cAlias != NIL, " Select(" + cAlias + ")=" + LTrim(Str(Select(cAlias))), "" ) + ;
+               " NetErr=" + IIF(NetErr(), "T", "F") + ;
+               " file=" + IIF(Empty(lDirectory), cDbfDir + cDataBase, cDataBase) )
+
          ELSE
             SELECT Select(cDataBase)
          ENDIF
@@ -658,6 +665,10 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
          IF ! NetErr()
             IF ! Empty(cTag)
                OrdSetFocus( cTag )
+            ELSEIF OrdCount() > 0 .AND. OrdSetFocus() == 0
+               // Clipper DBFCDXAX auto-activates first CDX tag on open;
+               // Harbour ADS RDD does not — emulate that behavior here.
+               OrdSetFocus( 1 )
             ENDIF
             RETURN .T.
          ENDIF
@@ -2134,7 +2145,9 @@ dbGoTop()
 //   COPY TO (::cTempFileDir+::cPrepDbf)
 //     FOR ShaiCond(::aTstBlocks,::oScrl,recno(),::cTypeOfReport == "REPORT")
 //     .AND. IF(VALTYPE(::cbExtraCond)=="B", Eval(::cbExtraCond), .T.)
-COPY TO (cTmpFile) ;
+// VIA "DBFCDX": d_ord is open via ADS, but PrepareGenDb reopens t_ordPre with DBFCDX.
+// Without VIA, COPY TO uses ADS for the output file which may be incompatible with DBFCDX.
+COPY TO (cTmpFile) VIA "DBFCDX" ;
    FOR ShaiCond(aTstBlks, NIL, RecNo(), .T.) ;
    .AND. IIF(ValType(oRep:cbExtraCond) == "B", Eval(oRep:cbExtraCond), .T.)
 
