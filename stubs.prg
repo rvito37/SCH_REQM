@@ -2172,7 +2172,7 @@ FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
 LOCAL cIdxFile := "G:\USERS\TAPI_SCH\d_stockt"
 LOCAL cSaveScr
-LOCAL nTotal, nCount, nPct, nLastPct
+LOCAL nTotal, nCount, nPct, nLastPct, nStockArea
 
 // Save screen — original schedindex ran as separate EXE via MYRUN,
 // so its @ SAY output didn't contaminate the main app's display
@@ -2221,18 +2221,21 @@ d_stock->(dbGoTop())
 
 // === Фаза 2: Создать 6 условных тегов (как в schedindex.prg) ===
 // Original schedindex.prg ran as a SEPARATE PROCESS (MYRUN) with its own
-// ADS connection. ORDCREATE on d_stock already open via ADS in the same
-// process fails with Error 7008. Fix: open d_stock via DBFCDX locally,
-// create the CDX, then close the local copy.
+// ADS connection. ADS ORDCREATE fails (7008) and DBFCDX can't co-open (OsCode 32).
+// Fix: close ADS d_stock, open via DBFCDX, create CDX, close, reopen via ADS.
 LogWrite("SchedIndex: создаю теги в " + cIdxFile)
 
 DevPos(8, 11) ; DevOut( PadR( "Phase 2/2: Creating index tags", 52 ) )
 
-// Flush Phase 1 updates so DBFCDX sees current seq_no values
+// Flush Phase 1 updates, save area, close ADS copy
 d_stock->(dbCommit())
+nStockArea := Select("d_stock")
+d_stock->(dbCloseArea())
+LogWrite("SchedIndex: closed ADS d_stock (area=" + LTrim(Str(nStockArea)) + ") for DBFCDX index creation")
 
-// Open d_stock locally via DBFCDX for index creation
-USE ("G:\AVXBMS\d_stock") VIA "DBFCDX" SHARED NEW ALIAS "d_stk_idx"
+// Open d_stock locally via DBFCDX in the same area
+dbSelectArea(nStockArea)
+dbUseArea(.F., "DBFCDX", "G:\AVXBMS\d_stock", "d_stk_idx", .T.)
 LogWrite("SchedIndex: opened d_stk_idx via DBFCDX, Select=" + LTrim(Str(Select())))
 
 SchedIdxTag( cIdxFile, 1, "viva_CZ",   .T. )
@@ -2259,13 +2262,15 @@ SchedIdxTag( cIdxFile, 6, "U_viva_06", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
 
-// Close the local DBFCDX copy
-d_stk_idx->(dbCloseArea())
-LogWrite("SchedIndex: closed d_stk_idx, CDX created")
+// Close DBFCDX copy
+dbCloseArea()
+LogWrite("SchedIndex: CDX created, reopening d_stock via ADS")
 
-// Restore d_stock selection (ADS copy)
-DbSelectArea("d_stock")
+// Reopen d_stock via ADS in the same area with original alias
+dbSelectArea(nStockArea)
+dbUseArea(.F., "ADS", "G:\AVXBMS\d_stock", "d_stock", .T.)
 d_stock->(dbGoTop())
+LogWrite("SchedIndex: d_stock reopened via ADS, Select=" + LTrim(Str(Select("d_stock"))))
 
 SchedProgress( 9, 12, 100 )
 
