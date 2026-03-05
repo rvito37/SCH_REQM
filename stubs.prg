@@ -598,8 +598,14 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
       cDbfDir := cDir
    ENDIF
 
-   // Select RDD driver: DBFCDX for local (C:), ADS for network
-   cDriver := IIF( Left(cDbfDir, 2) $ "C:", "DBFCDX", GetMyDriver() )
+   // Select RDD driver: DBFCDX for local (C:) or temp/user dirs, ADS for production data
+   // ADS Error 3007: UDFs (like SchOrdDue) in INDEX key expressions are not supported
+   // by ADS server-side processing. Temp files use DBFCDX to allow UDF-based indexes.
+   IF Left(cDbfDir, 2) $ "C:" .OR. Upper(Left(cDbfDir, 9)) == "G:\USERS\"
+      cDriver := "DBFCDX"
+   ELSE
+      cDriver := GetMyDriver()
+   ENDIF
 
    DEFAULT lNewWorkArea TO .T.
    DEFAULT lOpenMode    TO .T.      // .T. = SHARED
@@ -1181,13 +1187,25 @@ METHOD New() CLASS GetUserInfoClass
    ELSE
       ::cDbfDir := "G:\AVXBMS\"
    ENDIF
-   ::cTempDir    := hb_DirTemp() + "\"
+   // Оригинал: TMPFILE= из .ini файла пользователя (G:\USERS\TAPI_SCH\)
+   // Путь на G:\ — ADS-сервер обслуживает его (как schedindex.prg)
+   IF hb_DirExists( "G:\USERS\TAPI_SCH\" )
+      ::cTempDir := "G:\USERS\TAPI_SCH\"
+   ELSE
+      hb_DirBuild( "G:\USERS\TAPI_SCH\" )
+      IF hb_DirExists( "G:\USERS\TAPI_SCH\" )
+         ::cTempDir := "G:\USERS\TAPI_SCH\"
+      ELSE
+         ::cTempDir := hb_DirTemp() + "\"
+         LogWrite("WARNING: G:\USERS\TAPI_SCH\ недоступен, fallback на " + ::cTempDir)
+      ENDIF
+   ENDIF
    ::cUserId     := fn_WhoAmI()
    ::cGroupId    := ""
    ::cWIPCardNo  := "000000000000"
    ::cMapDir     := ""
    ::cPrnDir     := ""
-   LogWrite( "GetUserInfo:New() cDbfDir=" + ::cDbfDir + " cUserId=" + ::cUserId )
+   LogWrite( "GetUserInfo:New() cDbfDir=" + ::cDbfDir + " cTempDir=" + ::cTempDir + " cUserId=" + ::cUserId )
 RETURN Self
 
 METHOD updateUserInRec( cFileName, cProgName, lNewRec ) CLASS GetUserInfoClass
