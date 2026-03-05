@@ -1,0 +1,16 @@
+# schedidx2.hbp - Separate EXE for creating d_stockt CDX index
+# Called from main SCH_REQM app during scheduling
+
+-inc
+-w0
+-es0
+-n
+
+# Console mode (no GUI needed)
+-gtWIN
+
+# Libraries
+rddads.hbc
+
+# Source
+schedidx2.prg

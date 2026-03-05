@@ -550,10 +550,10 @@ LOCAL lOk := .T.
 LOCAL cFile := cIndex
 LOCAL bOldErr
 
-   // sch_reqm.prg ищет cTempDir+"d_stocktmp", а SchedIndex строит
-   // CDX в G:\AVXBMS\ (ADS managed dir) с суффиксом пользователя.
+   // sch_reqm.prg ищет cTempDir+"d_stocktmp", а оригинал строит
+   // G:\USERS\TAPI_SCH\d_stockt. Подменяем полный путь.
    IF "d_stocktmp" $ cIndex
-      cIndex := "G:\AVXBMS\d_stockt"
+      cIndex := "G:\USERS\TAPI_SCH\d_stockt"
       cFile := cIndex
       LogWrite("SafeDbSetIndex: подмена d_stocktmp -> " + cIndex)
    ENDIF
@@ -2165,14 +2165,15 @@ RETURN NIL
 // Обновляет seq_no из c_hierar, потом создаёт 6 условных тегов
 // в d_stockt.cdx для поиска по локации (CZ/IL/06).
 //
-// CDX создаётся в G:\AVXBMS\ (ADS managed dir) — ADS Error 7008 при записи
-// в G:\USERS\TAPI_SCH\ (not managed). User suffix для изоляции параллельных запусков.
+// Phase 2 runs schedidx2.exe as a SEPARATE PROCESS (like original MYRUN)
+// because ADS ORDCREATE fails in a process that already has d_stock open.
 // ============================================
 FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
-LOCAL cIdxFile := "G:\AVXBMS\d_stockt"
+LOCAL cIdxFile := "G:\USERS\TAPI_SCH\d_stockt"
 LOCAL cSaveScr
 LOCAL nTotal, nCount, nPct, nLastPct
+LOCAL cExe, nExitCode
 
 // Save screen — original schedindex ran as separate EXE via MYRUN,
 // so its @ SAY output didn't contaminate the main app's display
@@ -2219,38 +2220,22 @@ ENDDO
 
 d_stock->(dbGoTop())
 
-// === Фаза 2: Создать 6 условных тегов (как в schedindex.prg) ===
-// DBFCDX can't open d_stock (ADS server holds OS lock). Use ADS ORDCREATE
-// with CDX in G:\AVXBMS\ (ADS managed directory). FOR uses &() like original.
-LogWrite("SchedIndex: создаю теги в " + cIdxFile)
+// === Фаза 2: Создать 6 условных тегов — через отдельный процесс ===
+// ADS ORDCREATE fails when d_stock is already open in the same process.
+// Original used MYRUN("G:\SOURCE\test.exe"). We run schedidx2.exe.
+LogWrite("SchedIndex: создаю теги в " + cIdxFile + " через schedidx2.exe")
 
-DevPos(8, 11) ; DevOut( PadR( "Phase 2/2: Creating index tags", 52 ) )
+DevPos(8, 11) ; DevOut( PadR( "Phase 2/2: Creating index tags...", 52 ) )
 
-DbSelectArea("d_stock")
+// Flush Phase 1 updates before external process reads them
+d_stock->(dbCommit())
 
-SchedIdxTag( cIdxFile, 1, "viva_CZ",   .T. )
-INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_CZ TO (cIdxFile) FOR &(LOC == 'CZ' .AND. wh3+wh4 > 0)
-
-SchedIdxTag( cIdxFile, 2, "viva_IL",   .T. )
-INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_IL TO (cIdxFile) FOR &(LOC == 'IL' .AND. wh3+wh4 > 0)
-
-SchedIdxTag( cIdxFile, 3, "U_viva_CZ", .T. )
-INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_CZ TO (cIdxFile) FOR &(LOC == 'CZ' .AND. wh3+wh4 > 0)
-
-SchedIdxTag( cIdxFile, 4, "U_viva_IL", .T. )
-INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_IL TO (cIdxFile) FOR &(LOC == 'IL' .AND. wh3+wh4 > 0)
-
-SchedIdxTag( cIdxFile, 5, "viva_06",   .T. )
-INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
-
-SchedIdxTag( cIdxFile, 6, "U_viva_06", .T. )
-INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
+// Run external EXE — separate ADS connection, can create CDX
+cExe := hb_DirBase() + "schedidx2.exe"
+nExitCode := -1
+LogWrite("SchedIndex: running " + cExe)
+nExitCode := hb_processRun( cExe )
+LogWrite("SchedIndex: schedidx2.exe exitCode=" + LTrim(Str(nExitCode)))
 
 d_stock->(dbGoTop())
 
