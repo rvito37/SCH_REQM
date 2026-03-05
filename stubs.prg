@@ -550,10 +550,10 @@ LOCAL lOk := .T.
 LOCAL cFile := cIndex
 LOCAL bOldErr
 
-   // sch_reqm.prg ищет cTempDir+"d_stocktmp", а SchedIndex строит
-   // CDX в G:\AVXBMS\ (ADS-served dir) с суффиксом пользователя.
+   // sch_reqm.prg ищет cTempDir+"d_stocktmp", а оригинал строит
+   // G:\USERS\TAPI_SCH\d_stockt. Подменяем полный путь.
    IF "d_stocktmp" $ cIndex
-      cIndex := "G:\AVXBMS\d_stockt_" + AllTrim(GetUserInfo():cUserId)
+      cIndex := "G:\USERS\TAPI_SCH\d_stockt"
       cFile := cIndex
       LogWrite("SafeDbSetIndex: подмена d_stocktmp -> " + cIndex)
    ENDIF
@@ -2165,12 +2165,12 @@ RETURN NIL
 // Обновляет seq_no из c_hierar, потом создаёт 6 условных тегов
 // в d_stockt.cdx для поиска по локации (CZ/IL/06).
 //
-// Индексный файл создаётся в G:\AVXBMS\ (ADS-served directory)
-// с суффиксом пользователя для изоляции при параллельном запуске.
+// Индексный файл создаётся в G:\USERS\TAPI_SCH\ — как в оригинале.
+// Phase 2 opens d_stock via DBFCDX locally to avoid ADS ORDCREATE Error 7008.
 // ============================================
 FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
-LOCAL cIdxFile := "G:\AVXBMS\d_stockt_" + AllTrim(GetUserInfo():cUserId)
+LOCAL cIdxFile := "G:\USERS\TAPI_SCH\d_stockt"
 LOCAL cSaveScr
 LOCAL nTotal, nCount, nPct, nLastPct
 
@@ -2220,33 +2220,52 @@ ENDDO
 d_stock->(dbGoTop())
 
 // === Фаза 2: Создать 6 условных тегов (как в schedindex.prg) ===
+// Original schedindex.prg ran as a SEPARATE PROCESS (MYRUN) with its own
+// ADS connection. ORDCREATE on d_stock already open via ADS in the same
+// process fails with Error 7008. Fix: open d_stock via DBFCDX locally,
+// create the CDX, then close the local copy.
 LogWrite("SchedIndex: создаю теги в " + cIdxFile)
 
 DevPos(8, 11) ; DevOut( PadR( "Phase 2/2: Creating index tags", 52 ) )
 
+// Flush Phase 1 updates so DBFCDX sees current seq_no values
+d_stock->(dbCommit())
+
+// Open d_stock locally via DBFCDX for index creation
+USE ("G:\AVXBMS\d_stock") VIA "DBFCDX" SHARED NEW ALIAS "d_stk_idx"
+LogWrite("SchedIndex: opened d_stk_idx via DBFCDX, Select=" + LTrim(Str(Select())))
+
 SchedIdxTag( cIdxFile, 1, "viva_CZ",   .T. )
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_CZ TO (cIdxFile) FOR &(LOC == 'CZ' .AND. wh3+wh4 > 0)
+   TAG viva_CZ TO (cIdxFile) FOR LOC == 'CZ' .AND. wh3+wh4 > 0
 
 SchedIdxTag( cIdxFile, 2, "viva_IL",   .T. )
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_IL TO (cIdxFile) FOR &(LOC == 'IL' .AND. wh3+wh4 > 0)
+   TAG viva_IL TO (cIdxFile) FOR LOC == 'IL' .AND. wh3+wh4 > 0
 
 SchedIdxTag( cIdxFile, 3, "U_viva_CZ", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_CZ TO (cIdxFile) FOR &(LOC == 'CZ' .AND. wh3+wh4 > 0)
+   TAG U_viva_CZ TO (cIdxFile) FOR LOC == 'CZ' .AND. wh3+wh4 > 0
 
 SchedIdxTag( cIdxFile, 4, "U_viva_IL", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_IL TO (cIdxFile) FOR &(LOC == 'IL' .AND. wh3+wh4 > 0)
+   TAG U_viva_IL TO (cIdxFile) FOR LOC == 'IL' .AND. wh3+wh4 > 0
 
 SchedIdxTag( cIdxFile, 5, "viva_06",   .T. )
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
+   TAG viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
 
 SchedIdxTag( cIdxFile, 6, "U_viva_06", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
-   TAG U_viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
+   TAG U_viva_06 TO (cIdxFile) FOR LOC $ 'IL_CZ' .AND. wh6 > 0
+
+// Close the local DBFCDX copy
+d_stk_idx->(dbCloseArea())
+LogWrite("SchedIndex: closed d_stk_idx, CDX created")
+
+// Restore d_stock selection (ADS copy)
+DbSelectArea("d_stock")
+d_stock->(dbGoTop())
 
 SchedProgress( 9, 12, 100 )
 
