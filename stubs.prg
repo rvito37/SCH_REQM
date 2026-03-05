@@ -2173,7 +2173,6 @@ LOCAL nOldArea := Select()
 LOCAL cIdxFile := "G:\USERS\TAPI_SCH\d_stockt"
 LOCAL cSaveScr
 LOCAL nTotal, nCount, nPct, nLastPct
-LOCAL nStockArea
 
 // Save screen — original schedindex ran as separate EXE via MYRUN,
 // so its @ SAY output didn't contaminate the main app's display
@@ -2221,21 +2220,12 @@ ENDDO
 d_stock->(dbGoTop())
 
 // === Фаза 2: Создать 6 условных тегов (как в schedindex.prg) ===
-// ADS ORDCREATE fails with 7008 when d_stock is already open.
-// Fix: close d_stock, reopen fresh via ADS, create CDX, close, reopen original.
 LogWrite("SchedIndex: создаю теги в " + cIdxFile)
 
 DevPos(8, 11) ; DevOut( PadR( "Phase 2/2: Creating index tags", 52 ) )
 
-// Flush Phase 1 updates, close ADS d_stock
 d_stock->(dbCommit())
-nStockArea := Select("d_stock")
-d_stock->(dbCloseArea())
-LogWrite("SchedIndex: closed d_stock (area=" + LTrim(Str(nStockArea)) + "), opening fresh for ORDCREATE")
-
-// Open d_stock fresh via ADS for index creation
-dbSelectArea(nStockArea)
-dbUseArea(.F., "ADS", "G:\AVXBMS\d_stock", "d_stk_idx", .T.)
+DbSelectArea("d_stock")
 
 SchedIdxTag( cIdxFile, 1, "viva_CZ",   .T. )
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
@@ -2261,12 +2251,7 @@ SchedIdxTag( cIdxFile, 6, "U_viva_06", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
 
-// Close temp, reopen d_stock with original alias
-dbCloseArea()
-dbSelectArea(nStockArea)
-dbUseArea(.F., "ADS", "G:\AVXBMS\d_stock", "d_stock", .T.)
 d_stock->(dbGoTop())
-LogWrite("SchedIndex: d_stock reopened, area=" + LTrim(Str(Select("d_stock"))))
 
 SchedProgress( 9, 12, 100 )
 
