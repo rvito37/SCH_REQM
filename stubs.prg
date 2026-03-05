@@ -2172,12 +2172,12 @@ IF FILE(cIdxFile + ".cdx")
    LogWrite("SchedIndex: удалён старый " + cIdxFile + ".cdx")
 ENDIF
 
-// Draw progress box
-DispBox( 7, 12, 12, 65, B_DOUBLE + " " )
-@ 7, 15 SAY " Stock Index "
+// Draw progress box (col 10 covers "Preparing tempery" text at col 11)
+DispBox( 7, 10, 12, 66, B_DOUBLE + " " )
+@ 7, 22 SAY " Stock Index "
 
 // === Фаза 1: Обновить seq_no из c_hierar ===
-@ 8, 14 SAY "Phase 1/2: Updating priorities from c_hierar"
+@ 9, 12 SAY PadR( "Phase 1/2: Updating priorities from c_hierar", 53 )
 
 DbSelectArea("d_stock")
 nTotal := d_stock->(LastRec())
@@ -2195,8 +2195,8 @@ DO WHILE !d_stock->(Eof())
    nCount++
    nPct := Int( d_stock->(RecNo()) * 100 / nTotal )
    IF nPct != nLastPct
-      SchedProgress( 10, 14, 50, nPct )
-      @ 11, 14 SAY PadR( LTrim(Str(d_stock->(RecNo()))) + " / " + LTrim(Str(nTotal)), 20 )
+      SchedProgress( 10, 12, nPct )
+      @ 11, 12 SAY PadR( LTrim(Str(d_stock->(RecNo()))) + " / " + LTrim(Str(nTotal)), 53 )
       nLastPct := nPct
    ENDIF
    d_stock->(dbSkip())
@@ -2209,47 +2209,35 @@ d_stock->(dbGoTop())
 // === Фаза 2: Создать 6 условных тегов (как в schedindex.prg) ===
 LogWrite("SchedIndex: создаю теги в " + cIdxFile)
 
-@ 8, 14 SAY PadR( "Phase 2/2: Creating index tags", 50 )
-@ 11, 14 SAY Space(20)
+@ 9, 12 SAY PadR( "Phase 2/2: Creating index tags", 53 )
+@ 11, 12 SAY Space(53)
 
-SchedProgress( 10, 14, 50, 0 )
-@ 11, 14 SAY PadR( "1/6  viva_CZ ...", 30 )
+SchedIdxTag( cIdxFile, 1, "viva_CZ",   .T. )
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG viva_CZ TO (cIdxFile) FOR &(LOC == 'CZ' .AND. wh3+wh4 > 0)
-LogWrite("SchedIndex: тег viva_CZ создан")
 
-SchedProgress( 10, 14, 50, 17 )
-@ 11, 14 SAY PadR( "2/6  viva_IL ...", 30 )
+SchedIdxTag( cIdxFile, 2, "viva_IL",   .T. )
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG viva_IL TO (cIdxFile) FOR &(LOC == 'IL' .AND. wh3+wh4 > 0)
-LogWrite("SchedIndex: тег viva_IL создан")
 
-SchedProgress( 10, 14, 50, 33 )
-@ 11, 14 SAY PadR( "3/6  U_viva_CZ ...", 30 )
+SchedIdxTag( cIdxFile, 3, "U_viva_CZ", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_CZ TO (cIdxFile) FOR &(LOC == 'CZ' .AND. wh3+wh4 > 0)
-LogWrite("SchedIndex: тег U_viva_CZ создан")
 
-SchedProgress( 10, 14, 50, 50 )
-@ 11, 14 SAY PadR( "4/6  U_viva_IL ...", 30 )
+SchedIdxTag( cIdxFile, 4, "U_viva_IL", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_IL TO (cIdxFile) FOR &(LOC == 'IL' .AND. wh3+wh4 > 0)
-LogWrite("SchedIndex: тег U_viva_IL создан")
 
-SchedProgress( 10, 14, 50, 67 )
-@ 11, 14 SAY PadR( "5/6  viva_06 ...", 30 )
+SchedIdxTag( cIdxFile, 5, "viva_06",   .T. )
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
-LogWrite("SchedIndex: тег viva_06 создан")
 
-SchedProgress( 10, 14, 50, 83 )
-@ 11, 14 SAY PadR( "6/6  U_viva_06 ...", 30 )
+SchedIdxTag( cIdxFile, 6, "U_viva_06", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
-LogWrite("SchedIndex: тег U_viva_06 создан")
 
-SchedProgress( 10, 14, 50, 100 )
-@ 11, 14 SAY PadR( "Done!", 30 )
+SchedProgress( 10, 12, 100 )
+@ 11, 12 SAY PadR( "Done!", 53 )
 
 LogWrite("SchedIndex: завершён, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
 
@@ -2258,12 +2246,24 @@ RESTORE SCREEN FROM cSaveScr
 dbSelectArea(nOldArea)
 RETURN NIL
 
-// Progress bar helper: draws a bar at (nRow, nCol) of nWidth chars at nPct%
-STATIC FUNCTION SchedProgress( nRow, nCol, nWidth, nPct )
-LOCAL nFill := Int( nWidth * nPct / 100 )
-LOCAL cBar := Replicate( Chr(219), nFill ) + Replicate( Chr(176), nWidth - nFill )
-@ nRow, nCol SAY cBar
-@ nRow, nCol + nWidth + 1 SAY PadR( LTrim(Str(nPct)) + "%", 5 )
+// Show tag progress and log
+STATIC FUNCTION SchedIdxTag( cIdxFile, nTag, cName, lBefore )
+   HB_SYMBOL_UNUSED( cIdxFile )
+   IF lBefore
+      SchedProgress( 10, 12, Int( (nTag - 1) * 100 / 6 ) )
+      @ 11, 12 SAY PadR( LTrim(Str(nTag)) + "/6  " + cName + " ...", 53 )
+   ELSE
+      LogWrite("SchedIndex: тег " + cName + " создан")
+   ENDIF
+RETURN NIL
+
+// Progress bar: row nRow, starting at col nCol, inside box cols 12..64 (53 chars)
+// Bar 47 chars + space + 4 chars for percentage = 52 chars
+STATIC FUNCTION SchedProgress( nRow, nCol, nPct )
+LOCAL nBarW := 47
+LOCAL nFill := Int( nBarW * Min(nPct, 100) / 100 )
+LOCAL cBar := Replicate( Chr(219), nFill ) + Replicate( Chr(176), nBarW - nFill )
+@ nRow, nCol SAY cBar + " " + PadL( LTrim(Str(Min(nPct, 100))) + "%", 4 )
 RETURN NIL
 
 // GetHie_2 - Get hierarchy priority for stock record (from schedindex.prg)
