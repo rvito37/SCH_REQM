@@ -2303,10 +2303,10 @@ LOCAL nPct, nAt
    ENDIF
 RETURN NIL
 
-// Progress bar: row nRow, starting at col nCol, inside box cols 12..64 (53 chars)
-// Bar 47 chars + space + 4 chars for percentage = 52 chars
+// Progress bar: row nRow, starting at col nCol, inside box cols 10..63
+// Box inner: cols 11..62 (52 chars). Bar starts at 12: 46 + 1 + 4 = 51 chars → ends at col 62
 FUNCTION SchedProgress( nRow, nCol, nPct )
-LOCAL nBarW := 47
+LOCAL nBarW := 46
 LOCAL nFill := Int( nBarW * Min(nPct, 100) / 100 )
 LOCAL cBar := Replicate( Chr(219), nFill ) + Replicate( Chr(176), nBarW - nFill )
 @ nRow, nCol SAY cBar + " " + PadL( LTrim(Str(Min(nPct, 100))) + "%", 4 )
