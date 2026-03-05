@@ -550,10 +550,10 @@ LOCAL lOk := .T.
 LOCAL cFile := cIndex
 LOCAL bOldErr
 
-   // sch_reqm.prg ищет cTempDir+"d_stocktmp", а оригинал строит
-   // G:\USERS\TAPI_SCH\d_stockt. Подменяем полный путь.
+   // sch_reqm.prg ищет cTempDir+"d_stocktmp", а SchedIndex строит
+   // CDX в G:\AVXBMS\ (ADS-served dir) с суффиксом пользователя.
    IF "d_stocktmp" $ cIndex
-      cIndex := "G:\USERS\TAPI_SCH\d_stockt"
+      cIndex := "G:\AVXBMS\d_stockt_" + AllTrim(GetUserInfo():cUserId)
       cFile := cIndex
       LogWrite("SafeDbSetIndex: подмена d_stocktmp -> " + cIndex)
    ENDIF
@@ -665,7 +665,7 @@ FUNCTION NetUse( cDataBase, nSeconds, cDriver, lOpenMode, lNewWorkArea, cDir, cA
          IF ! NetErr()
             IF ! Empty(cTag)
                OrdSetFocus( cTag )
-            ELSEIF OrdCount() > 0 .AND. OrdSetFocus() == 0
+            ELSEIF OrdCount() > 0 .AND. Empty( OrdSetFocus() )
                // Clipper DBFCDXAX auto-activates first CDX tag on open;
                // Harbour ADS RDD does not — emulate that behavior here.
                OrdSetFocus( 1 )
@@ -826,6 +826,7 @@ FUNCTION GenOpenFiles( aFileList, lMode )
       FOR i := 1 TO Len( aFileList )
          IF Select( aFileList[i] ) == 0
             IF NetUse( aFileList[i], 5, , lMode )
+               // Index auto-activation now handled inside NetUse (line 668)
                AAdd( aoOpenedList, aFileList[i] )
             ELSE
                AAdd( aoOpenedList, NIL )
@@ -2164,12 +2165,12 @@ RETURN NIL
 // Обновляет seq_no из c_hierar, потом создаёт 6 условных тегов
 // в d_stockt.cdx для поиска по локации (CZ/IL/06).
 //
-// Индексный файл создаётся в G:\USERS\TAPI_SCH\ — как в оригинале.
-// Это сетевой путь видимый ADS серверу, поэтому ADS Error 5020 не будет.
+// Индексный файл создаётся в G:\AVXBMS\ (ADS-served directory)
+// с суффиксом пользователя для изоляции при параллельном запуске.
 // ============================================
 FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
-LOCAL cIdxFile := "G:\USERS\TAPI_SCH\d_stockt"
+LOCAL cIdxFile := "G:\AVXBMS\d_stockt_" + AllTrim(GetUserInfo():cUserId)
 LOCAL cSaveScr
 LOCAL nTotal, nCount, nPct, nLastPct
 
@@ -2185,45 +2186,43 @@ IF FILE(cIdxFile + ".cdx")
    LogWrite("SchedIndex: удалён старый " + cIdxFile + ".cdx")
 ENDIF
 
-// Draw progress box (col 10 covers "Preparing tempery" text at col 11)
-DispBox( 7, 10, 12, 66, B_DOUBLE + " " )
-@ 7, 22 SAY " Stock Index "
+// Use the existing screen area (no separate frame)
+DispBox( 7, 10 , 10 ,63 , B_DOUBLE+" " )
 
 // === Фаза 1: Обновить seq_no из c_hierar ===
-@ 9, 12 SAY PadR( "Phase 1/2: Updating priorities from c_hierar", 53 )
+// Use DevPos/DevOut to bypass @ 8,11 SAY preprocessor hook
+DevPos(8, 11) ; DevOut( PadR( "Phase 1/2: Updating priorities from c_hierar", 52 ) )
 
 DbSelectArea("d_stock")
 nTotal := d_stock->(LastRec())
-d_stock->(dbSetFilter({|| d_stock->wh1 + d_stock->wh2 + d_stock->wh3 + d_stock->wh4 + d_stock->wh6 > 0}))
 d_stock->(dbGoTop())
 
 LogWrite("SchedIndex: обновляю seq_no из c_hierar, total=" + LTrim(Str(nTotal)))
 nCount := 0
 nLastPct := -1
 DO WHILE !d_stock->(Eof())
-   IF d_stock->(RLock())
-      d_stock->seq_no := GetHie_2(d_stock->tol_id, d_stock->volt_id, d_stock->tc_id)
-      d_stock->(dbUnlock())
+   // Filter inline instead of dbSetFilter — gives smooth progress bar
+   IF d_stock->wh1 + d_stock->wh2 + d_stock->wh3 + d_stock->wh4 + d_stock->wh6 > 0
+      IF d_stock->(RLock())
+         d_stock->seq_no := GetHie_2(d_stock->tol_id, d_stock->volt_id, d_stock->tc_id)
+         d_stock->(dbUnlock())
+      ENDIF
    ENDIF
    nCount++
-   nPct := Int( d_stock->(RecNo()) * 100 / nTotal )
+   nPct := Int( nCount * 100 / nTotal )
    IF nPct != nLastPct
-      SchedProgress( 10, 12, nPct )
-      @ 11, 12 SAY PadR( LTrim(Str(d_stock->(RecNo()))) + " / " + LTrim(Str(nTotal)), 53 )
+      SchedProgress( 9, 12, nPct )
       nLastPct := nPct
    ENDIF
    d_stock->(dbSkip())
 ENDDO
 
-// Снять фильтр после обновления seq_no
-d_stock->(dbClearFilter())
 d_stock->(dbGoTop())
 
 // === Фаза 2: Создать 6 условных тегов (как в schedindex.prg) ===
 LogWrite("SchedIndex: создаю теги в " + cIdxFile)
 
-@ 9, 12 SAY PadR( "Phase 2/2: Creating index tags", 53 )
-@ 11, 12 SAY Space(53)
+DevPos(8, 11) ; DevOut( PadR( "Phase 2/2: Creating index tags", 52 ) )
 
 SchedIdxTag( cIdxFile, 1, "viva_CZ",   .T. )
 INDEX ON ptype_id+pline_id+size_id+Str(value_id,9,3)+Descend(seq_no)+DtoS(dadd_rec) ;
@@ -2249,8 +2248,7 @@ SchedIdxTag( cIdxFile, 6, "U_viva_06", .T. )
 INDEX ON ptype_id+pline_id+size_id+Descend(seq_no)+DtoS(dadd_rec) ;
    TAG U_viva_06 TO (cIdxFile) FOR &(LOC $ 'IL_CZ' .AND. wh6 > 0)
 
-SchedProgress( 10, 12, 100 )
-@ 11, 12 SAY PadR( "Done!", 53 )
+SchedProgress( 9, 12, 100 )
 
 LogWrite("SchedIndex: завершён, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
 
@@ -2263,16 +2261,32 @@ RETURN NIL
 STATIC FUNCTION SchedIdxTag( cIdxFile, nTag, cName, lBefore )
    HB_SYMBOL_UNUSED( cIdxFile )
    IF lBefore
-      SchedProgress( 10, 12, Int( (nTag - 1) * 100 / 6 ) )
-      @ 11, 12 SAY PadR( LTrim(Str(nTag)) + "/6  " + cName + " ...", 53 )
+      SchedProgress( 9, 12, Int( (nTag - 1) * 100 / 6 ) )
    ELSE
       LogWrite("SchedIndex: тег " + cName + " создан")
    ENDIF
 RETURN NIL
 
+// SchedMainSay - intercepts @ 8,11 SAY from sch_reqm.prg main loops.
+// Displays text + visual progress bar when text contains "( XX % )".
+FUNCTION SchedMainSay( cText )
+LOCAL nPct, nAt
+   // Display text at row 8, col 11 (use DevPos/DevOut to avoid preprocessor recursion)
+   DevPos(8, 11)
+   DevOut( PadR(cText, 52) )
+   // Parse "( XX % )" percentage from end of text
+   nAt := RAt("(", cText)
+   IF nAt > 0
+      nPct := Int( Val( SubStr(cText, nAt + 1) ) )
+      IF nPct >= 1 .AND. nPct <= 100
+         SchedProgress(9, 12, nPct)
+      ENDIF
+   ENDIF
+RETURN NIL
+
 // Progress bar: row nRow, starting at col nCol, inside box cols 12..64 (53 chars)
 // Bar 47 chars + space + 4 chars for percentage = 52 chars
-STATIC FUNCTION SchedProgress( nRow, nCol, nPct )
+FUNCTION SchedProgress( nRow, nCol, nPct )
 LOCAL nBarW := 47
 LOCAL nFill := Int( nBarW * Min(nPct, 100) / 100 )
 LOCAL cBar := Replicate( Chr(219), nFill ) + Replicate( Chr(176), nBarW - nFill )
