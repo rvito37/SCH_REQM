@@ -2157,6 +2157,11 @@ RETURN NIL
 FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
 LOCAL cIdxFile := "G:\USERS\TAPI_SCH\d_stockt"
+LOCAL cSaveScr
+
+// Save screen — original schedindex ran as separate EXE via MYRUN,
+// so its @ SAY output didn't contaminate the main app's display
+SAVE SCREEN TO cSaveScr
 
 LogWrite("SchedIndex: starting, idxFile=" + cIdxFile)
 
@@ -2221,6 +2226,7 @@ LogWrite("SchedIndex: тег U_viva_06 создан")
 
 LogWrite("SchedIndex: завершён, d_stockt exists=" + IIF(FILE(cIdxFile + ".cdx"), "T", "F"))
 
+RESTORE SCREEN FROM cSaveScr
 dbSelectArea(nOldArea)
 RETURN NIL
 
@@ -2715,8 +2721,11 @@ RETURN "LPT1"
 
 // GetRec (real: BMS/SCH_ORDM.PRG line 584)
 // Tries to lock the current record and shows progress at aPos. Returns .T. on success.
+// Original displays record count at aPos for progress indication.
 FUNCTION GetRec( aPos )
-   HB_SYMBOL_UNUSED( aPos )
+   IF aPos != NIL .AND. ValType(aPos) == "A" .AND. Len(aPos) >= 2
+      @ aPos[1], aPos[2] SAY LTrim(Str(RecNo()))
+   ENDIF
 RETURN .T.
 
 // TestAvail (real: BMS/SCH_ORDM.PRG line 1700)

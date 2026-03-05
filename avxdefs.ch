@@ -19,12 +19,10 @@
 // ADS CDX compatibility (maps DBFCDXAX commands to Harbour ADS)
 #include "dbfcdxax.ch"
 
-// DBCREATE RDD mapping for local/temp files
-// In Clipper, DBFCDXAX was a real RDD and NIL used the default (DBFCDX).
-// In Harbour, default RDD is ADS (for network), but temp files are local.
-// Map both "DBFCDXAX" and NIL to "DBFCDX" so DBCREATE uses local driver.
-#xtranslate DBCREATE( <file>, <struct>, "DBFCDXAX" ) => DBCREATE( <file>, <struct>, "DBFCDX" )
-#xtranslate DBCREATE( <file>, <struct>, NIL )         => DBCREATE( <file>, <struct>, "DBFCDX" )
+// DBCREATE RDD mapping: Clipper "DBFCDXAX" не существует в Harbour.
+// Temp файлы на G:\USERS\TAPI_SCH\ — ADS обслуживает этот путь.
+// Маппим на вызов без 3-го параметра → default RDD (ADS).
+#xtranslate DBCREATE( <file>, <struct>, "DBFCDXAX" ) => DBCREATE( <file>, <struct> )
 
 // LFNLIB stub (not needed in Harbour - native LFN support)
 // #include "LFNLIB.ch"
@@ -113,14 +111,8 @@
 // Also fix the FIELD declaration to use truncated names
 FIELD Sched_sour, Sched_Grou
 
-// COPY TO fix: when default RDD is ADSCDX, COPY TO local temp paths fails
-// because ADS cannot create files on local paths. Force DBFCDX for all COPY TO.
-// Override the standard std.ch COPY TO command to hardcode VIA "DBFCDX".
-#command COPY [TO <(f)>] [FIELDS <fields,...>]                              ;
-              [FOR <for>] [WHILE <while>] [NEXT <next>]                     ;
-              [RECORD <rec>] [<rest:REST>] [ALL] [VIA <rdd>] [CODEPAGE <cp>] => ;
-         __dbCopy( <(f)>, { <(fields)> },                                   ;
-                   <{for}>, <{while}>, <next>, <rec>, <.rest.>, "DBFCDX",, <cp> )
+// COPY TO: temp файлы на G:\ — ADS обслуживает, override не нужен.
+// Стандартный std.ch COPY TO использует RDD текущей workarea (ADS).
 
 // dbsetindex wrapper: ADS requires table and index on same server.
 // Temp indexes (d_stocktmp.cdx) may be local while table is on ADS.
@@ -134,6 +126,11 @@ FIELD Sched_sour, Sched_Grou
 // Use DevPos+DevOut to avoid circularity with @ SAY #command pattern.
 #command @ 9, 11 SAY "Preparing tempery files : Stock files index" =>;
    DevPos(9, 11) ;; DevOut("Preparing tempery files : Stock files index") ;; SchedIndex()
+
+// FrzLn optimization: FrzLn() (sch_reqm.prg:1733) opens and closes D_Frzln
+// via ADS for EVERY record in the scheduling loop — extremely slow.
+// Prevent closing so NetUse reuses the already-open handle on subsequent calls.
+#xtranslate DbCloseArea( "D_frzln" ) =>
 
 // REQUEST for ADS, codepage, and CT3 functions used in macro-compiled index keys
 REQUEST DBFCDX
