@@ -553,7 +553,7 @@ LOCAL bOldErr
    // sch_reqm.prg ищет cTempDir+"d_stocktmp", а SchedIndex строит
    // CDX в G:\AVXBMS\ (ADS managed dir) с суффиксом пользователя.
    IF "d_stocktmp" $ cIndex
-      cIndex := "G:\AVXBMS\d_stockt_" + AllTrim(GetUserInfo():cUserId)
+      cIndex := "G:\AVXBMS\d_stockt"
       cFile := cIndex
       LogWrite("SafeDbSetIndex: подмена d_stocktmp -> " + cIndex)
    ENDIF
@@ -2170,7 +2170,7 @@ RETURN NIL
 // ============================================
 FUNCTION SchedIndex()
 LOCAL nOldArea := Select()
-LOCAL cIdxFile := "G:\AVXBMS\d_stockt_" + AllTrim(GetUserInfo():cUserId)
+LOCAL cIdxFile := "G:\AVXBMS\d_stockt"
 LOCAL cSaveScr
 LOCAL nTotal, nCount, nPct, nLastPct
 
