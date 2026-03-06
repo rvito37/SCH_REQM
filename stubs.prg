@@ -1330,6 +1330,15 @@ aCutDefault_pf := Array(nLen)
 AFill(aCutIndicators_pf, .F.)
 AFill(aCutDefault_pf, .F.)
 
+// Default criteria: Purpose and Status pre-selected (matching SCHEDV03 production defaults)
+// Criteria indices: 1=Product type, 2=Product line, 3=Size, 4=Value, 5=Purpose, 6=Status, 7=ESN(XX)
+IF nLen >= 6
+   aCutIndicators_pf[5] := .T.   // Purpose checkbox ON
+   aCutIndicators_pf[6] := .T.   // Status checkbox ON
+   cPurpose_pf := "1_7_E_9_5_8_"
+   cBstat_pf   := "M_ _P_S_N_O_E_F_T_R_._"
+ENDIF
+
 IF nDevices_pf == 1
    // For scheduling: Printer, Screen, SpreadSheet
 ELSEIF nDevices_pf == 2
@@ -2451,15 +2460,177 @@ FUNCTION QtyConvert( nOrigQty, pBtype, pLineId, pSizeId, pOrigUom, pConvUom, lFr
 RETURN nOrigQty
 
 // AvailbleForAnyone (real: BMS/BTCHVIEW.PRG line 361)
+// AvailbleForAnyOne - returns array of {tol_id, qty} pairs
+// Real source: BTCHVIEWOLD.PRG line 361
+// Second param (cTol) is passed by sch_reqm.prg but ignored by original implementation
 FUNCTION AvailbleForAnyone( cDbf, cTol )
-   HB_SYMBOL_UNUSED( cDbf )
-   HB_SYMBOL_UNUSED( cTol )
-RETURN .T.
+LOCAL aRet := {}, cBSeqNo, cProc, nQty := 0
+LOCAL xKey
+LOCAL i, lReport := .F.
+
+HB_SYMBOL_UNUSED( cTol )
+DEFAULT cDbf TO "d_line"
+
+xKey := "P" + (cDbf)->b_type + (cDbf)->size_id
+
+IF Select("d_irrfin") > 0
+   d_Irrfin->(ordsetfocus(2))
+ENDIF
+c_expqty->(ordsetfocus("iuts"))
+IF Select("c_tol") > 0
+   c_tol->(ordsetfocus("c_ptol"))
+ENDIF
+
+// 1. Check d_finqc for finished QC quantities
+IF Select("d_finqc") > 0 .AND. d_finqc->(dbseek((cDbf)->b_id))
+   WHILE d_finqc->b_id == (cDbf)->b_id
+      IF d_finqc->wh == "4"
+         nQty := nQty + d_finqc->QC_QTY
+      ENDIF
+      d_finqc->(dbskip(1))
+   ENDDO
+   AAdd(aRet, {(cDbf)->tol_id, nQty})
+
+// 2. Check d_irrfin for irregular/finished inventory (with tol_id)
+ELSEIF !Empty((cDbf)->tol_id)
+   IF Select("c_tol") > 0 .AND. Select("d_irrfin") > 0
+      c_tol->(dbseek((cDbf)->ptype_id + (cDbf)->tol_id))
+      cBSeqNo := c_tol->seq_no
+      c_tol->(dbseek((cDbf)->ptype_id))
+      WHILE !c_tol->(Eof()) .AND. c_tol->ptype_id == (cDbf)->ptype_id
+         IF c_tol->tol_id == "R"
+            c_tol->(DbSkip())
+            LOOP
+         ENDIF
+         IF d_irrfin->(DBSEEK((cDbf)->B_ID + "991.0")) .OR. ;
+            d_irrfin->(DBSEEK((cDbf)->B_ID + "991.5")) .OR. ;
+            d_irrfin->(DBSEEK((cDbf)->B_ID + "192.0")) .OR. ;
+            d_irrfin->(DBSEEK((cDbf)->B_ID + "192.5")) .OR. ;
+            d_irrfin->(DBSEEK((cDbf)->B_ID + "189.0")) .OR. ;
+            d_irrfin->(DBSEEK((cDbf)->B_ID + "189.5"))
+            IF Empty(cProc)
+               cProc := d_irrfin->CPPROC_ID
+            ENDIF
+            nQty := 0
+            WHILE (cDbf)->B_ID + cProc == D_IRRFIN->B_ID + D_IRRFIN->CPPROC_ID
+               IF c_tol->tol_id == AllTrim(D_IRRFIN->REP_UNIT)
+                  nQty := nQty + IIF(cProc $ "189.0_189.5", d_irrfin->QTY_REEL + d_irrfin->QTY_LOOSE, d_irrfin->QTY_REEL)
+               ENDIF
+               d_irrfin->(dbskip(1))
+            ENDDO
+            IF nQty > 0
+               AAdd(aRet, {c_tol->tol_id, nQty})
+            ENDIF
+            lReport := .T.
+         ENDIF
+         c_tol->(DbSkip())
+      ENDDO
+   ENDIF
+
+// 3. Check d_irrfin without tol_id
+ELSE
+   IF Select("d_irrfin") > 0
+      IF d_irrfin->(DBSEEK((cDbf)->B_ID + "991.0")) .OR. ;
+         d_irrfin->(DBSEEK((cDbf)->B_ID + "991.5")) .OR. ;
+         d_irrfin->(DBSEEK((cDbf)->B_ID + "192.0")) .OR. ;
+         d_irrfin->(DBSEEK((cDbf)->B_ID + "192.5")) .OR. ;
+         d_irrfin->(DBSEEK((cDbf)->B_ID + "189.0")) .OR. ;
+         d_irrfin->(DBSEEK((cDbf)->B_ID + "189.5"))
+         IF Empty(cProc)
+            cProc := d_irrfin->CPPROC_ID
+         ENDIF
+         nQty := 0
+         WHILE (cDbf)->B_ID + cProc == D_IRRFIN->B_ID + D_IRRFIN->CPPROC_ID
+            nQty := nQty + IIF(cProc $ "189.0_189.5", d_irrfin->QTY_REEL + d_irrfin->QTY_LOOSE, d_irrfin->QTY_REEL)
+            d_irrfin->(dbskip(1))
+         ENDDO
+         IF nQty > 0
+            AAdd(aRet, {(cDbf)->tol_id, nQty})
+         ENDIF
+         lReport := .T.
+      ENDIF
+   ENDIF
+ENDIF
+
+// 4. Fallback: calculate from c_expqty if nothing found
+IF Empty(aRet) .AND. (cDbf)->b_type <> "Z"
+   IF c_expqty->(DbSeek(xKey))
+      WHILE "P" + c_expqty->b_type + c_expqty->size_id == xKey
+         IF (cDbf)->value_id >= c_expqty->lval_lim .AND. ;
+            (cDbf)->value_id <= c_expqty->hval_lim .AND. ;
+            c_expqty->tol_id == (cDbf)->tol_id
+            AAdd(aRet, {(cDbf)->tol_id, (cDbf)->cp_bqtyp * c_expqty->exp_yld * (cDbf)->expq_fctr})
+            EXIT
+         ENDIF
+         c_expqty->(DbSkip())
+      ENDDO
+   ENDIF
+ENDIF
+IF Empty(aRet) .AND. (cDbf)->b_type == "Z"
+   AAdd(aRet, {(cDbf)->tol_id, (cDbf)->cp_bqtyp * 0.80 * (cDbf)->expq_fctr})
+ENDIF
+
+// 5. Subtract split quantities (uses d_line + m_linemv)
+IF lReport .AND. Select("d_line") > 0 .AND. Select("m_linemv") > 0
+   FOR i := 1 TO Len(aRet)
+      aRet[i][2] := aRet[i][2] - AvailGetSplit("d_line", "m_linemv", aRet[i][1], (cDbf)->b_id)
+   NEXT
+ENDIF
+
+RETURN aRet
+
+// GetSplit helper for AvailbleForAnyOne (real: BTCHVIEWOLD.PRG line 493)
+// Renamed to AvailGetSplit to avoid conflicts with any existing GetSplit
+STATIC FUNCTION AvailGetSplit( cParent, cChild, cTol, cBid )
+LOCAL nRet := 0
+LOCAL cParentRec, cChildRec, cParentOrd, cChildOrd
+
+// Save state
+cParentRec := (cParent)->(RecNo())
+cChildRec  := (cChild)->(RecNo())
+
+// Check if required indexes exist before switching
+BEGIN SEQUENCE
+   cParentOrd := (cParent)->(ordsetfocus("i_split"))
+   cChildOrd  := (cChild)->(ordsetfocus("ilnmvbs"))
+
+   (cParent)->(dbseek(cBid))
+   WHILE (cParent)->ESN_P1 == cBid
+      IF (cChild)->(dbseek((cParent)->b_id)) .AND. (cParent)->tol_id == cTol
+         nRet := nRet + (cParent)->CP_BQTYP
+      ENDIF
+      (cParent)->(dbskip(1))
+   ENDDO
+
+   // Restore state
+   (cParent)->(ordsetfocus(cParentOrd))
+   (cChild)->(ordsetfocus(cChildOrd))
+RECOVER
+   // Index not available — skip split calculation
+END SEQUENCE
+
+(cParent)->(dbgoto(cParentRec))
+(cChild)->(dbgoto(cChildRec))
+RETURN nRet
 
 // TestQty (real: BMS/SCH_ORDM.PRG line 1987)
+// Rounds down nQty to a multiple of the etalon (pack) quantity
 FUNCTION TestQty( nQty )
-   HB_SYMBOL_UNUSED( nQty )
-RETURN .T.
+LOCAL nOldSelect := Select()
+LOCAL QtyEtalon := 0
+
+IF d_ord->esny_id $ "_4_7_C_D_B_"
+   QtyEtalon := d_ord->qty_ord
+ELSE
+   c_esny->(ordsetfocus(1))
+   c_esny->(dbseek(d_ord->esny_id))
+   QtyEtalon := c_esny->esny_qty
+ENDIF
+IF QtyEtalon != 0 .AND. nQty % QtyEtalon <> 0
+   nQty := nQty - nQty % QtyEtalon
+ENDIF
+Select(nOldSelect)
+RETURN nQty
 
 // OrdReqPending (stub - no source found)
 FUNCTION OrdReqPending()
@@ -2797,7 +2968,69 @@ FUNCTION GetRec( aPos )
 RETURN .T.
 
 // TestAvail (real: BMS/SCH_ORDM.PRG line 1700)
-// TestAvail (real: BMS/SCH_ORDM.PRG) - tests c_expqty for errors
+// Tests c_expqty for double and error records
 // Returns { {tol_ids}, {seq_nos} } array pair
 FUNCTION TestAvail()
-RETURN { {}, {} }
+LOCAL nOldArea := Select()
+LOCAL lExit := .F.
+LOCAL xKey, bKey, i
+LOCAL aTols := {}, aTempTols := {}, aSeqNos := {}
+LOCAL aUoms := {"W", "P", "S"}
+LOCAL hLog
+
+DbSelectArea("c_tol")
+ordsetfocus("c_ptol")
+dbseek(d_line->ptype_id)
+
+WHILE c_tol->ptype_id == d_line->ptype_id .AND. !c_tol->(Eof())
+   IF d_line->value_id >= c_tol->lval_lim .AND. d_line->value_id <= c_tol->hval_lim .AND. c_tol->tol_id <> "R"
+      FOR i := 1 TO 3
+         xKey := aUoms[i] + d_line->b_type + d_line->size_id
+         c_expqty->(ordsetfocus("iuts"))
+         bKey := COMPILE(c_expqty->(ordkey()))
+         IF c_expqty->(DbSeek(xKey))
+            WHILE bKey:eval() == xKey
+               IF Empty(d_line->tol_id)
+                  lExit := (d_line->value_id >= c_expqty->lval_lim .AND. ;
+                            d_line->value_id <= c_expqty->hval_lim)
+               ELSE
+                  lExit := (d_line->value_id >= c_expqty->lval_lim .AND. ;
+                            d_line->value_id <= c_expqty->hval_lim) .AND. ;
+                            c_tol->tol_id == c_expqty->tol_id
+               ENDIF
+               IF lExit
+                  IF aScan(aTempTols, c_expqty->tol_id) == 0
+                     AAdd(aTempTols, c_expqty->tol_id)
+                     AAdd(aSeqNos, c_tol->seq_no)
+                  ENDIF
+               ENDIF
+               c_expqty->(DbSkip())
+            ENDDO
+         ENDIF
+         IF aScan(aTempTols, c_tol->tol_id) == 0
+            // Log missing exp.qty to file (non-critical)
+            IF hLog == NIL
+               hLog := FCreate(GetUserInfo():cTempDir + "qtyprob.txt")
+               IF hLog >= 0
+                  FWrite(hLog, "+-----------------------------------------------------------------------+" + Chr(13) + Chr(10))
+                  FWrite(hLog, "| " + DToC(Date()) + "                              AVX Israel             " + Time() + " |" + Chr(13) + Chr(10))
+                  FWrite(hLog, "|     Scheduling module's results : Esn's with non defined routes       |" + Chr(13) + Chr(10))
+                  FWrite(hLog, "+-----------------------------------------------------------------------+" + Chr(13) + Chr(10))
+               ENDIF
+            ENDIF
+            IF hLog != NIL .AND. hLog >= 0
+               FWrite(hLog, "| " + PadR("Lack of Exp.Qty for UOM[ " + aUoms[i] + " ] " + d_line->b_type + " " + d_line->size_id + " " + Str(d_line->value_id, 9, 3) + " " + c_tol->tol_id, 69) + " |" + Chr(13) + Chr(10))
+            ENDIF
+         ENDIF
+      NEXT
+   ENDIF
+   c_tol->(dbskip(1))
+ENDDO
+
+IF hLog != NIL .AND. hLog >= 0
+   FClose(hLog)
+ENDIF
+
+DbSelectArea(nOldArea)
+aTols := aTempTols
+RETURN {aTols, aSeqNos}

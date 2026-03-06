@@ -127,6 +127,11 @@ FIELD Sched_sour, Sched_Grou
 #command @ 9, 11 SAY "Preparing tempery files : Stock files index" =>;
    DevPos(9, 11) ;; DevOut("Preparing tempery files : Stock files index") ;; SchedIndex()
 
+// Main loop progress bar: intercept @ 8,11 SAY to draw a visual progress bar
+// when the text contains a percentage (lines 614, 733 in sch_reqm.prg).
+// SchedIndex uses DevPos/DevOut to bypass this hook.
+#command @ 8, 11 SAY <x> => SchedMainSay(<x>)
+
 // FrzLn optimization: FrzLn() (sch_reqm.prg:1733) opens and closes D_Frzln
 // via ADS for EVERY record in the scheduling loop — extremely slow.
 // Prevent closing so NetUse reuses the already-open handle on subsequent calls.
